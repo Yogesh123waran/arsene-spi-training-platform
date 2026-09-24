@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState, useTransition } from "react";
+import { createContext, useContext, useMemo, useTransition } from "react";
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { logoutAction } from "@/services/auth.actions";
@@ -30,7 +30,11 @@ export interface AuthProviderProps {
  * boundary: route protection lives in RoleGuard + middleware.
  */
 export function AuthProvider({ initialUser, children }: AuthProviderProps) {
-  const [user] = useState(initialUser);
+  // Read the prop directly rather than copying it into state: the root
+  // layout stays mounted across client navigations, so only a fresh
+  // prop (delivered by router.refresh() after login/logout) reflects
+  // the current session.
+  const user = initialUser;
   const [isLoggingOut, startTransition] = useTransition();
   const router = useRouter();
   const { showToast } = useToast();
