@@ -174,10 +174,12 @@ export const mockClasses: ClassWithRelations[] = [
 
 /** Filter option lists for the Classes filter bar, derived from the demo data. */
 export const mockClassFilterOptions = {
+  // All demo courses/batches/trainers are published/upcoming/active,
+  // so every entry is selectable (same validity rules as Supabase mode).
   courses: [
-    { id: COURSE_SPI, title: "SPI Training" },
-    { id: COURSE_CONTROL, title: "Control Systems" },
-    { id: COURSE_SAFETY, title: "Process Safety" },
+    { id: COURSE_SPI, title: "SPI Training", selectable: true },
+    { id: COURSE_CONTROL, title: "Control Systems", selectable: true },
+    { id: COURSE_SAFETY, title: "Process Safety", selectable: true },
   ],
   modules: [
     { id: MODULE_FUNDAMENTALS, title: "Instrumentation Fundamentals", courseId: COURSE_SPI },
@@ -185,13 +187,13 @@ export const mockClassFilterOptions = {
     { id: MODULE_LOOPS, title: "Control Loops", courseId: COURSE_CONTROL },
   ],
   batches: [
-    { id: BATCH_A, name: "Batch A" },
-    { id: BATCH_B, name: "Batch B" },
-    { id: BATCH_C, name: "Batch C" },
+    { id: BATCH_A, name: "Batch A", courseId: COURSE_SPI, trainerId: TRAINER_RAJESH, selectable: true },
+    { id: BATCH_B, name: "Batch B", courseId: COURSE_CONTROL, trainerId: TRAINER_ANITA, selectable: true },
+    { id: BATCH_C, name: "Batch C", courseId: COURSE_SAFETY, trainerId: TRAINER_KARTHIK, selectable: true },
   ],
   trainers: [
-    { id: TRAINER_RAJESH, name: "Rajesh Kumar" },
-    { id: TRAINER_ANITA, name: "Anita Desai" },
-    { id: TRAINER_KARTHIK, name: "Karthik Raman" },
+    { id: TRAINER_RAJESH, name: "Rajesh Kumar", selectable: true },
+    { id: TRAINER_ANITA, name: "Anita Desai", selectable: true },
+    { id: TRAINER_KARTHIK, name: "Karthik Raman", selectable: true },
   ],
 };

@@ -3,7 +3,9 @@ import { authService } from "./auth.service";
 import { classesRepository, ClassRepositoryError, type ClassScope } from "@/repositories/classes.repository";
 import { DEMO_STUDENT_BATCH_ID, DEMO_TRAINER_ID } from "@/lib/mock/classes.mock";
 import { authConfig } from "@/config/auth";
+import { getClassFilterOptions } from "@/lib/classes/filter-options";
 import type {
+  ClassFilterOptions,
   ClassFilters,
   ClassSummaryCounts,
   ClassValidationErrors,
@@ -44,27 +46,36 @@ export class ClassValidationError extends Error {
 
 /**
  * Maps the authenticated user to the slice of class data they may
- * see. Admin: everything. Trainer: their own classes. Student: their
- * enrolled batch's classes.
+ * see. Admin: everything. Trainer: their own classes. Student: the
+ * classes of the batches they are enrolled in (or completed).
  *
- * NOTE (temporary, Phase 1): trainerId/batchId are taken from the
- * user's auth id, and in demo mode from the fixed demo identities.
- * The real mapping (trainer profile row, student→batch enrolment)
- * arrives with those tables in a later phase — at which point only
- * this function changes.
+ * Supabase mode: trainers.id = students.id = the auth user id, and a
+ * student's batches come from batch_students. Demo mode uses the fixed
+ * demo identities. RLS enforces the same boundaries in the database;
+ * this scope is the defence-in-depth second layer.
  */
-function resolveScope(user: AuthUser): ClassScope {
+async function resolveScope(user: AuthUser): Promise<ClassScope> {
   switch (user.role) {
     case "admin":
       return {};
     case "trainer":
-      return { trainerId: authConfig.mode === "demo" ? DEMO_TRAINER_ID : user.id };
+      return { trainerId: ownTrainerId(user) };
     case "student":
-      return { batchId: authConfig.mode === "demo" ? DEMO_STUDENT_BATCH_ID : user.id };
+      return {
+        batchIds:
+          authConfig.mode === "demo"
+            ? [DEMO_STUDENT_BATCH_ID]
+            : await classesRepository.findEnrolledBatchIds(user.id),
+      };
     default:
       // Unknown role — fail closed with a scope that matches nothing.
-      return { batchId: "__no_access__" };
+      return { batchIds: [] };
   }
+}
+
+/** The trainer id a trainer's classes are assigned to. */
+function ownTrainerId(user: AuthUser): string {
+  return authConfig.mode === "demo" ? DEMO_TRAINER_ID : user.id;
 }
 
 async function requireUser(): Promise<AuthUser> {
@@ -163,6 +174,95 @@ function normalise(input: CreateClassInput): CreateClassInput {
   };
 }
 
+type ClassLinks = Pick<CreateClassInput, "courseId" | "moduleId" | "batchId" | "trainerId">;
+
+/**
+ * Checks the course / module / batch / trainer combination against the
+ * option lists the caller is allowed to see (RLS-scoped in Supabase
+ * mode). Mirrors the database rules so users get a clear field error
+ * instead of a generic database failure:
+ *   - batch and module must belong to the class's course (composite FKs)
+ *   - the class's trainer must be the batch's assigned trainer
+ *     (classes_enforce_batch_trainer trigger)
+ *   - trainers may only use batches they run (classes_trainer_* RLS)
+ * plus the UX-only scheduling rules: new/changed links must be
+ * selectable (published course, upcoming/ongoing batch, active trainer).
+ *
+ * With `previous` (an update), only links that actually changed are
+ * checked, so editing an existing class — e.g. one in a batch that has
+ * since completed — isn't blocked by rules for new scheduling.
+ */
+async function validateRelationships(
+  links: ClassLinks,
+  user: AuthUser,
+  options: ClassFilterOptions,
+  previous?: ClassLinks
+): Promise<ClassValidationErrors> {
+  const changed = (key: keyof ClassLinks) => !previous || links[key] !== previous[key];
+  const errors: ClassValidationErrors = {};
+
+  if (previous && !changed("courseId") && !changed("moduleId") && !changed("batchId") && !changed("trainerId")) {
+    return errors;
+  }
+
+  const course = options.courses.find((c) => c.id === links.courseId);
+  if (!course) {
+    errors.courseId = "Select a valid course.";
+  } else if (changed("courseId") && !course.selectable) {
+    errors.courseId = "This course isn't open for scheduling (it isn't published).";
+  }
+
+  const batch = options.batches.find((b) => b.id === links.batchId);
+  if (!batch) {
+    errors.batchId = "Select a valid batch.";
+  } else if (batch.courseId !== links.courseId) {
+    errors.batchId = "This batch belongs to a different course.";
+  } else if (changed("batchId") && !batch.selectable) {
+    errors.batchId = "This batch is completed or cancelled.";
+  } else if (changed("batchId") || changed("trainerId")) {
+    if (!batch.trainerId) {
+      errors.batchId = "Assign a trainer to this batch before scheduling classes.";
+    } else if (user.role === "trainer" && batch.trainerId !== ownTrainerId(user)) {
+      errors.batchId = "You can only schedule classes for batches you run.";
+    } else if (links.trainerId !== batch.trainerId) {
+      errors.trainerId = "The trainer must be this batch's assigned trainer.";
+    }
+  }
+
+  if (links.moduleId && (changed("moduleId") || changed("courseId"))) {
+    const courseModule = options.modules.find((m) => m.id === links.moduleId);
+    if (!courseModule || courseModule.courseId !== links.courseId) {
+      errors.moduleId = "This module doesn't belong to the selected course.";
+    }
+  }
+
+  if (user.role === "admin" && changed("trainerId") && !errors.trainerId) {
+    const trainer = options.trainers.find((t) => t.id === links.trainerId);
+    if (!trainer) {
+      errors.trainerId = "Select a valid trainer.";
+    } else if (!trainer.selectable) {
+      errors.trainerId = "This trainer isn't active.";
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * A trainer may only change or cancel classes in batches they
+ * currently run — the same rule as the classes_trainer_update policy,
+ * checked first so the user gets a clear message rather than a
+ * database rejection (e.g. for a past class in a batch that has since
+ * been reassigned to another trainer).
+ */
+function assertTrainerRunsBatch(user: AuthUser, batchId: string, options: ClassFilterOptions): void {
+  if (user.role !== "trainer") return;
+  const batch = options.batches.find((b) => b.id === batchId);
+  if (!batch || batch.trainerId !== ownTrainerId(user)) {
+    throw new ClassAuthorizationError("You can only change classes in batches you currently run.");
+  }
+}
+
 // -------------------------------------------------------------------
 // Service
 // -------------------------------------------------------------------
@@ -171,19 +271,19 @@ export const classesService = {
   /** Classes visible to the current user, honouring their role scope. */
   async listClasses(filters: ClassFilters = {}): Promise<ClassWithRelations[]> {
     const user = await requireUser();
-    return classesRepository.findAll(filters, resolveScope(user));
+    return classesRepository.findAll(filters, await resolveScope(user));
   },
 
   /** A single class, or null if it doesn't exist *or* is out of the caller's scope. */
   async getClass(id: string): Promise<ClassWithRelations | null> {
     const user = await requireUser();
-    return classesRepository.findById(id, resolveScope(user));
+    return classesRepository.findById(id, await resolveScope(user));
   },
 
   /** Counts for the dashboard/summary cards, computed from the caller's own scope. */
   async getSummary(): Promise<ClassSummaryCounts> {
     const user = await requireUser();
-    const all = await classesRepository.findAll({}, resolveScope(user));
+    const all = await classesRepository.findAll({}, await resolveScope(user));
     const today = new Date().toISOString().slice(0, 10);
 
     return {
@@ -198,18 +298,20 @@ export const classesService = {
     const user = await requireUser();
     if (!canManage(user)) throw new ClassAuthorizationError("Only admins and trainers can create classes.");
 
-    const errors = validateClassInput(input, true);
-    if (Object.keys(errors).length > 0) throw new ClassValidationError(errors);
-
-    const clean = normalise(input);
-
     // A trainer may only ever create classes assigned to themselves —
     // enforced here as well as by RLS, so a forged trainerId in the
-    // form payload can't reassign the class.
-    if (user.role === "trainer") {
-      const ownId = authConfig.mode === "demo" ? DEMO_TRAINER_ID : user.id;
-      clean.trainerId = ownId;
-    }
+    // form payload can't reassign the class. Applied before validation
+    // because the trainer field is locked (empty) in their form.
+    const candidate: CreateClassInput =
+      user.role === "trainer" ? { ...input, trainerId: ownTrainerId(user) } : input;
+
+    const errors = validateClassInput(candidate, true);
+    if (Object.keys(errors).length > 0) throw new ClassValidationError(errors);
+
+    const clean = normalise(candidate);
+
+    const linkErrors = await validateRelationships(clean, user, await getClassFilterOptions());
+    if (Object.keys(linkErrors).length > 0) throw new ClassValidationError(linkErrors);
 
     return classesRepository.create(clean, user.id);
   },
@@ -218,23 +320,57 @@ export const classesService = {
     const user = await requireUser();
     if (!canManage(user)) throw new ClassAuthorizationError("Only admins and trainers can edit classes.");
 
-    const errors = validateClassInput(patch, false);
+    // Trainers can't reassign a class to someone else.
+    if (user.role === "trainer") delete patch.trainerId;
 
-    // A partial patch can still break the time range against values
-    // already stored, so re-validate against the persisted row.
-    if (patch.startTime || patch.endTime) {
-      const existing = await classesRepository.findById(id, resolveScope(user));
+    const errors = validateClassInput(patch, false);
+    const scope = await resolveScope(user);
+
+    const touchesTimes = Boolean(patch.startTime || patch.endTime);
+    const touchesLinks =
+      patch.courseId !== undefined ||
+      patch.moduleId !== undefined ||
+      patch.batchId !== undefined ||
+      patch.trainerId !== undefined;
+
+    // A partial patch can still break the time range or the
+    // course/module/batch/trainer relationship against values already
+    // stored, so re-validate against the persisted row. Trainers are
+    // always checked against the persisted row: they may only change
+    // classes in batches they currently run.
+    if (touchesTimes || touchesLinks || user.role === "trainer") {
+      const existing = await classesRepository.findById(id, scope);
       if (!existing) throw new ClassAuthorizationError("That class doesn't exist or isn't available to you.");
-      const start = patch.startTime ?? existing.startTime;
-      const end = patch.endTime ?? existing.endTime;
-      if (end <= start) errors.endTime = "End time must be after the start time.";
+
+      const options = touchesLinks || user.role === "trainer" ? await getClassFilterOptions() : null;
+      if (options) assertTrainerRunsBatch(user, existing.batchId, options);
+
+      if (touchesTimes) {
+        const start = patch.startTime ?? existing.startTime;
+        const end = patch.endTime ?? existing.endTime;
+        if (end <= start) errors.endTime = "End time must be after the start time.";
+      }
+
+      if (options && touchesLinks && Object.keys(errors).length === 0) {
+        const previous: ClassLinks = {
+          courseId: existing.courseId,
+          moduleId: existing.moduleId,
+          batchId: existing.batchId,
+          trainerId: existing.trainerId,
+        };
+        const next: ClassLinks = {
+          courseId: patch.courseId ?? existing.courseId,
+          moduleId: patch.moduleId !== undefined ? patch.moduleId : existing.moduleId,
+          batchId: patch.batchId ?? existing.batchId,
+          // A trainer's class stays theirs; for admins the trainer
+          // follows the batch unless explicitly (and validly) set.
+          trainerId: patch.trainerId ?? existing.trainerId,
+        };
+        Object.assign(errors, await validateRelationships(next, user, options, previous));
+      }
     }
 
     if (Object.keys(errors).length > 0) throw new ClassValidationError(errors);
-
-    const scope = resolveScope(user);
-    // Trainers can't reassign a class to someone else.
-    if (user.role === "trainer") delete patch.trainerId;
 
     return classesRepository.update(id, patch, scope);
   },
@@ -243,7 +379,15 @@ export const classesService = {
   async cancelClass(id: string): Promise<ClassWithRelations> {
     const user = await requireUser();
     if (!canManage(user)) throw new ClassAuthorizationError("Only admins and trainers can cancel classes.");
-    return classesRepository.update(id, { status: "cancelled" }, resolveScope(user));
+
+    const scope = await resolveScope(user);
+    if (user.role === "trainer") {
+      const existing = await classesRepository.findById(id, scope);
+      if (!existing) throw new ClassAuthorizationError("That class doesn't exist or isn't available to you.");
+      assertTrainerRunsBatch(user, existing.batchId, await getClassFilterOptions());
+    }
+
+    return classesRepository.update(id, { status: "cancelled" }, scope);
   },
 
   /**

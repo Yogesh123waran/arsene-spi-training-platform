@@ -104,8 +104,19 @@ export interface ClassSummaryCounts {
  * module.
  */
 export interface ClassFilterOptions {
-  courses: { id: string; title: string }[];
+  /**
+   * `selectable` = may be chosen for a NEW class or a changed link
+   * (published courses, upcoming/ongoing batches, active trainers).
+   * Non-selectable entries stay listed so the filter bar and existing
+   * classes still show them.
+   */
+  courses: { id: string; title: string; selectable: boolean }[];
   modules: { id: string; title: string; courseId: string }[];
-  batches: { id: string; name: string }[];
-  trainers: { id: string; name: string }[];
+  /**
+   * `courseId` lets the form offer only batches of the chosen course;
+   * `trainerId` (null = not yet assigned) is the batch's designated
+   * trainer, which every class in the batch must use.
+   */
+  batches: { id: string; name: string; courseId: string; trainerId: string | null; selectable: boolean }[];
+  trainers: { id: string; name: string; selectable: boolean }[];
 }

@@ -71,9 +71,18 @@ export function ClassForm({ options, initial, basePath, lockTrainer = false }: C
     setDraft((prev) => ({ ...prev, [key]: value }));
   }
 
-  // Modules are scoped to the chosen course so an invalid
-  // course/module pairing can't be submitted.
+  // Only selectable entries (published course, upcoming/ongoing batch,
+  // active trainer) are offered — plus the class's current value when
+  // editing, so an existing class still shows what it's linked to.
+  const availableCourses = options.courses.filter((c) => c.selectable || c.id === initial?.courseId);
+  const availableTrainers = options.trainers.filter((t) => t.selectable || t.id === initial?.trainerId);
+
+  // Modules and batches are scoped to the chosen course so an invalid
+  // course/module or course/batch pairing can't be submitted.
   const availableModules = options.modules.filter((m) => m.courseId === draft.courseId);
+  const availableBatches = options.batches.filter(
+    (b) => b.courseId === draft.courseId && (b.selectable || b.id === initial?.batchId)
+  );
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -135,13 +144,16 @@ export function ClassForm({ options, initial, basePath, lockTrainer = false }: C
               value={draft.courseId}
               onChange={(e) => {
                 set("courseId", e.target.value);
-                // Clear a module that belongs to the previous course.
+                // Clear a module/batch (and the batch's trainer) that
+                // belong to the previous course.
                 set("moduleId", null);
+                set("batchId", "");
+                if (!lockTrainer) set("trainerId", "");
               }}
               error={errors.courseId}
               disabled={isPending}
               placeholder="Select a course"
-              options={options.courses.map((c) => ({ label: c.title, value: c.id }))}
+              options={availableCourses.map((c) => ({ label: c.title, value: c.id }))}
             />
 
             <Select
@@ -160,11 +172,21 @@ export function ClassForm({ options, initial, basePath, lockTrainer = false }: C
               label="Batch"
               name="batchId"
               value={draft.batchId}
-              onChange={(e) => set("batchId", e.target.value)}
+              onChange={(e) => {
+                const batchId = e.target.value;
+                set("batchId", batchId);
+                // A class's trainer is its batch's assigned trainer
+                // (enforced by the database), so follow the batch.
+                if (!lockTrainer) {
+                  const batch = options.batches.find((b) => b.id === batchId);
+                  set("trainerId", batch?.trainerId ?? "");
+                }
+              }}
               error={errors.batchId}
-              disabled={isPending}
+              disabled={isPending || !draft.courseId}
+              hint={!draft.courseId ? "Choose a course first." : undefined}
               placeholder="Select a batch"
-              options={options.batches.map((b) => ({ label: b.name, value: b.id }))}
+              options={availableBatches.map((b) => ({ label: b.name, value: b.id }))}
             />
 
             <Select
@@ -176,7 +198,7 @@ export function ClassForm({ options, initial, basePath, lockTrainer = false }: C
               disabled={isPending || lockTrainer}
               hint={lockTrainer ? "Classes you schedule are assigned to you." : undefined}
               placeholder="Select a trainer"
-              options={options.trainers.map((t) => ({ label: t.name, value: t.id }))}
+              options={availableTrainers.map((t) => ({ label: t.name, value: t.id }))}
             />
           </div>
 

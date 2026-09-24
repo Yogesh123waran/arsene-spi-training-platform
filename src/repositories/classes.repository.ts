@@ -132,17 +132,10 @@ function toUpdateRow(patch: UpdateClassInput): ClassesUpdate {
 
 /**
  * Single joined select — one round trip per list query, never one
- * lookup per class. The embedded tables don't exist yet (see the
- * migration header); until they do, Supabase returns null for each
- * and mapRow() falls back to placeholder labels.
- *
- * Because `courses` / `modules` / `batches` / `trainers` are absent
- * from the Database type (they have no migration yet), supabase-js
- * can't infer the shape of the embedded rows, so callers narrow the
- * result to ClassRow explicitly. That narrowing is structural, not a
- * workaround for a type error: ClassRow extends the generated
- * ClassesRow, so the `classes` columns themselves stay fully checked.
- * Remove the narrowing once those tables are added to types.ts.
+ * lookup per class. Each embed follows a foreign key added in
+ * 0003_core_training_model.sql. An embedded row the caller may not
+ * read under RLS comes back as null, and mapRow() falls back to a
+ * placeholder label for it.
  */
 const SELECT_WITH_RELATIONS = `
   *,
@@ -216,8 +209,11 @@ function nowIso() {
 export interface ClassScope {
   /** Restrict to one trainer's classes (trainer portal). */
   trainerId?: string;
-  /** Restrict to one batch's classes (student portal). */
-  batchId?: string;
+  /**
+   * Restrict to these batches' classes (student portal: the student's
+   * enrolled batches). An empty array matches nothing.
+   */
+  batchIds?: string[];
 }
 
 export const classesRepository = {
@@ -225,9 +221,15 @@ export const classesRepository = {
     if (authConfig.mode === "demo") {
       let rows = demoRecords;
       if (scope.trainerId) rows = rows.filter((c) => c.trainerId === scope.trainerId);
-      if (scope.batchId) rows = rows.filter((c) => c.batchId === scope.batchId);
+      if (scope.batchIds) {
+        const allowed = scope.batchIds;
+        rows = rows.filter((c) => allowed.includes(c.batchId));
+      }
       return applyFiltersInMemory(rows, filters);
     }
+
+    // Enrolled in nothing -> nothing to show; skip the round trip.
+    if (scope.batchIds && scope.batchIds.length === 0) return [];
 
     const supabase = await createSupabaseServerClient();
     if (!supabase) throw new ClassRepositoryError();
@@ -236,7 +238,7 @@ export const classesRepository = {
       let query = supabase.from("classes").select(SELECT_WITH_RELATIONS);
 
       if (scope.trainerId) query = query.eq("trainer_id", scope.trainerId);
-      if (scope.batchId) query = query.eq("batch_id", scope.batchId);
+      if (scope.batchIds) query = query.in("batch_id", scope.batchIds);
 
       if (filters.courseId) query = query.eq("course_id", filters.courseId);
       if (filters.moduleId) query = query.eq("module_id", filters.moduleId);
@@ -265,7 +267,7 @@ export const classesRepository = {
       const { data, error } = await query.order("class_date", { ascending: false }).order("start_time");
       if (error) throw error;
 
-      return (data as unknown as ClassRow[]).map(mapRow);
+      return data.map(mapRow);
     } catch (err) {
       logDbError("findAll failed", err);
       throw new ClassRepositoryError();
@@ -279,9 +281,11 @@ export const classesRepository = {
       // Apply the same scoping the DB would, so demo mode can't leak
       // another trainer's / batch's class either.
       if (scope.trainerId && found.trainerId !== scope.trainerId) return null;
-      if (scope.batchId && found.batchId !== scope.batchId) return null;
+      if (scope.batchIds && !scope.batchIds.includes(found.batchId)) return null;
       return found;
     }
+
+    if (scope.batchIds && scope.batchIds.length === 0) return null;
 
     const supabase = await createSupabaseServerClient();
     if (!supabase) throw new ClassRepositoryError();
@@ -289,11 +293,11 @@ export const classesRepository = {
     try {
       let query = supabase.from("classes").select(SELECT_WITH_RELATIONS).eq("id", id);
       if (scope.trainerId) query = query.eq("trainer_id", scope.trainerId);
-      if (scope.batchId) query = query.eq("batch_id", scope.batchId);
+      if (scope.batchIds) query = query.in("batch_id", scope.batchIds);
 
       const { data, error } = await query.maybeSingle();
       if (error) throw error;
-      return data ? mapRow(data as unknown as ClassRow) : null;
+      return data ? mapRow(data) : null;
     } catch (err) {
       logDbError(`findById(${id}) failed`, err);
       throw new ClassRepositoryError();
@@ -327,7 +331,7 @@ export const classesRepository = {
         .select(SELECT_WITH_RELATIONS)
         .single();
       if (error) throw error;
-      return mapRow(data as unknown as ClassRow);
+      return mapRow(data);
     } catch (err) {
       logDbError("create failed", err);
       throw new ClassRepositoryError("We couldn't create the class. Please try again.");
@@ -355,7 +359,7 @@ export const classesRepository = {
 
       const { data, error } = await query.select(SELECT_WITH_RELATIONS).single();
       if (error) throw error;
-      return mapRow(data as unknown as ClassRow);
+      return mapRow(data);
     } catch (err) {
       logDbError(`update(${id}) failed`, err);
       throw new ClassRepositoryError("We couldn't update the class. Please try again.");
@@ -377,6 +381,31 @@ export const classesRepository = {
     } catch (err) {
       logDbError(`remove(${id}) failed`, err);
       throw new ClassRepositoryError("We couldn't delete the class. Please try again.");
+    }
+  },
+
+  /**
+   * Batches the student is currently enrolled in or has completed
+   * (withdrawn enrolments grant nothing). Supabase mode only — demo
+   * mode maps the demo student to a fixed batch in the service.
+   * RLS (batch_students_select) also limits this to the caller's own
+   * rows, so it cannot reveal another student's enrolments.
+   */
+  async findEnrolledBatchIds(studentId: string): Promise<string[]> {
+    const supabase = await createSupabaseServerClient();
+    if (!supabase) throw new ClassRepositoryError();
+
+    try {
+      const { data, error } = await supabase
+        .from("batch_students")
+        .select("batch_id")
+        .eq("student_id", studentId)
+        .in("enrollment_status", ["enrolled", "completed"]);
+      if (error) throw error;
+      return (data ?? []).map((row) => row.batch_id);
+    } catch (err) {
+      logDbError("findEnrolledBatchIds failed", err);
+      throw new ClassRepositoryError();
     }
   },
 };
