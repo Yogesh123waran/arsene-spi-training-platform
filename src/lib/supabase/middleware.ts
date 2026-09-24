@@ -1,6 +1,20 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
+import type { User } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { fetchProfileRole } from "@/lib/auth/profile-role";
+import type { UserRole } from "@/types/user";
+import type { Database } from "./types";
+
+export interface SupabaseSessionResult {
+  response: NextResponse;
+  user: User | null;
+  /**
+   * Role from public.profiles — only resolved when requested and a
+   * user is present; otherwise null. Never derived from user_metadata.
+   */
+  role: UserRole | null;
+}
 
 /**
  * Refreshes the Supabase session cookie on every request that passes
@@ -10,10 +24,13 @@ import type { NextRequest } from "next/server";
  * but stale/expired session.
  *
  * Returns the (possibly cookie-updated) response plus the resolved
- * user, so the caller (middleware.ts) can also make routing decisions
- * without a second round trip.
+ * user (and, for protected routes, their profile role), so the caller
+ * (middleware.ts) can make routing decisions with the same client.
  */
-export async function updateSupabaseSession(request: NextRequest) {
+export async function updateSupabaseSession(
+  request: NextRequest,
+  options: { resolveRole?: boolean } = {}
+): Promise<SupabaseSessionResult> {
   let response = NextResponse.next({ request });
 
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -21,10 +38,10 @@ export async function updateSupabaseSession(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!url || !publishableKey) {
-    return { response, user: null };
+    return { response, user: null, role: null };
   }
 
-  const supabase = createServerClient(url, publishableKey, {
+  const supabase = createServerClient<Database, "public">(url, publishableKey, {
     cookies: {
       getAll() {
         return request.cookies.getAll();
@@ -42,13 +59,17 @@ export async function updateSupabaseSession(request: NextRequest) {
       data: { user },
     } = await supabase.auth.getUser();
 
-    return { response, user };
+    const role = user && options.resolveRole ? await fetchProfileRole(supabase, user.id) : null;
+
+    // `response` is read only now, after every call that may have
+    // refreshed cookies via setAll above.
+    return { response, user, role };
   } catch (err) {
     // Supabase unreachable — fail closed (treat as unauthenticated)
     // rather than throwing inside middleware, which would 500 every
     // request. Route protection below then redirects to /login as
     // it would for any other unauthenticated visitor.
     console.error("[auth] middleware session refresh failed unexpectedly:", err instanceof Error ? err.message : err);
-    return { response, user: null };
+    return { response, user: null, role: null };
   }
 }

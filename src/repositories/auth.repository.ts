@@ -4,6 +4,7 @@ import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { authConfig, DEMO_ACCOUNTS, DEMO_PASSWORD } from "@/config/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { encodeDemoSession, decodeDemoSession } from "@/lib/auth/session";
+import { fetchProfileRole } from "@/lib/auth/profile-role";
 import type { AuthResult, AuthSession, AuthUser } from "@/types/auth";
 import type { UserRole } from "@/types/user";
 
@@ -35,16 +36,13 @@ function logAuthError(context: string, error: unknown) {
   console.error(`[auth] ${context}:`, error instanceof Error ? error.message : error);
 }
 
-function mapSupabaseUser(user: SupabaseUser): AuthUser {
-  const role = (user.user_metadata?.role as UserRole | undefined) ?? "student";
-  if (!user.user_metadata?.role) {
-    // Expected until a real `profiles` table exists (a later part) —
-    // logged server-side only, never surfaced to the client. Role
-    // resolution always reads this verified, server-fetched Supabase
-    // user record — never a client-supplied value.
-    console.warn(`[auth] Supabase user ${user.id} has no role in user_metadata; defaulting to "student".`);
-  }
-
+/**
+ * Builds the AuthUser for a Supabase user. `role` must come from
+ * fetchProfileRole() (public.profiles) — never from user_metadata,
+ * which the user can edit themselves. user_metadata is read below for
+ * display-only fields (name, avatar) and grants nothing.
+ */
+function mapSupabaseUser(user: SupabaseUser, role: UserRole): AuthUser {
   return {
     id: user.id,
     email: user.email ?? "",
@@ -124,7 +122,17 @@ async function loginSupabase(email: string, password: string): Promise<AuthResul
       return { success: false, error: "Invalid email or password." };
     }
 
-    return { success: true, user: mapSupabaseUser(data.user) };
+    // Credentials are valid, but access also requires a profile with a
+    // recognised role. Without one, fail closed: end the session that
+    // signInWithPassword just created so no half-authorized cookie
+    // remains.
+    const role = await fetchProfileRole(supabase, data.user.id);
+    if (!role) {
+      await supabase.auth.signOut();
+      return { success: false, error: "Your account isn't set up for access yet. Contact your administrator." };
+    }
+
+    return { success: true, user: mapSupabaseUser(data.user, role) };
   } catch (err) {
     logAuthError("signInWithPassword failed unexpectedly", err);
     return { success: false, error: GENERIC_AUTH_ERROR };
@@ -186,12 +194,17 @@ export const authRepository = {
       } = await supabase.auth.getUser();
       if (!user) return null;
 
+      // No profile / unrecognised role -> treated exactly like "not
+      // signed in" (fail closed); fetchProfileRole logs the reason.
+      const role = await fetchProfileRole(supabase, user.id);
+      if (!role) return null;
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
 
       return {
-        user: mapSupabaseUser(user),
+        user: mapSupabaseUser(user, role),
         expiresAt: session?.expires_at ? session.expires_at * 1000 : Date.now() + authConfig.session.maxAgeSeconds * 1000,
       };
     } catch (err) {

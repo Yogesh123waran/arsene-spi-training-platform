@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { authConfig } from "@/config/auth";
 import { decodeDemoSession } from "@/lib/auth/session";
-import { updateSupabaseSession } from "@/lib/supabase/middleware";
+import { updateSupabaseSession, type SupabaseSessionResult } from "@/lib/supabase/middleware";
 import { getPortalForPath } from "@/lib/auth/roles";
 import type { UserRole } from "@/types/user";
 
@@ -21,8 +21,12 @@ export async function middleware(request: NextRequest) {
   // In Supabase mode, always run the refresh so cookies stay valid —
   // even on public pages like /login, which redirects away if a
   // session already exists.
-  const supabaseResult =
-    authConfig.mode === "supabase" ? await updateSupabaseSession(request) : { response: NextResponse.next({ request }), user: null };
+  // The profile role is only looked up for protected portal routes, so
+  // public pages cost no extra query.
+  const supabaseResult: SupabaseSessionResult =
+    authConfig.mode === "supabase"
+      ? await updateSupabaseSession(request, { resolveRole: requiredPortal !== null })
+      : { response: NextResponse.next({ request }), user: null, role: null };
 
   if (!requiredPortal) {
     // Public/marketing/auth pages — nothing further to enforce here.
@@ -32,11 +36,14 @@ export async function middleware(request: NextRequest) {
   let role: UserRole | null = null;
 
   if (authConfig.mode === "demo") {
+    // Local development only — separate cookie-based identity.
     const payload = decodeDemoSession(request.cookies.get(authConfig.session.cookieName)?.value);
     role = payload?.role ?? null;
   } else {
-    const metadataRole = supabaseResult.user?.user_metadata?.role as UserRole | undefined;
-    role = supabaseResult.user ? metadataRole ?? "student" : null;
+    // Production: role from public.profiles only (see
+    // lib/auth/profile-role.ts). A signed-in user with no profile or
+    // an unrecognised role gets null here and is treated as signed out.
+    role = supabaseResult.role;
   }
 
   if (!role) {

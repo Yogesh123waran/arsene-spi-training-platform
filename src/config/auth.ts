@@ -21,23 +21,31 @@ function isSupabaseConfigured(): boolean {
  * agree on the mode without an extra round trip.
  *
  * Resolution order:
- *  1. NEXT_PUBLIC_AUTH_MODE="supabase" or "demo" — explicit, always wins.
+ *  0. Production (NODE_ENV === "production", i.e. `next build` /
+ *     `next start` / any deployment): ALWAYS "supabase". Demo mode's
+ *     unsigned session cookie and public passwords are a local
+ *     development convenience only and must never be reachable in
+ *     production — not even via NEXT_PUBLIC_AUTH_MODE=demo. Without
+ *     Supabase configured, production fails safely with a clear
+ *     "authentication isn't configured" error.
+ *  1. Development: NEXT_PUBLIC_AUTH_MODE="supabase" or "demo" wins.
  *  2. Otherwise: use Supabase if it's configured.
- *  3. Otherwise: demo mode — but ONLY outside production, so a
- *     misconfigured production deploy fails safely (falls through to
- *     "supabase" mode, which then reports a clear configuration error)
- *     instead of silently exposing the demo accounts.
+ *  3. Otherwise: demo mode.
  */
 function resolveAuthMode(): AuthMode {
   const explicit = process.env.NEXT_PUBLIC_AUTH_MODE;
+
+  if (process.env.NODE_ENV === "production") {
+    if (explicit === "demo" && typeof window === "undefined") {
+      console.warn('[auth] NEXT_PUBLIC_AUTH_MODE="demo" is ignored in production; using Supabase authentication.');
+    }
+    return "supabase";
+  }
+
   if (explicit === "supabase") return "supabase";
   if (explicit === "demo") return "demo";
 
   if (isSupabaseConfigured()) return "supabase";
-
-  if (process.env.NODE_ENV === "production") {
-    return "supabase";
-  }
 
   return "demo";
 }

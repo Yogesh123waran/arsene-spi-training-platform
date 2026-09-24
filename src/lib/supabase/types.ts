@@ -79,6 +79,35 @@ export type ClassesInsert = {
 /** Update shape: every column optional (partial patch). */
 export type ClassesUpdate = Partial<ClassesInsert>;
 
+/** Mirrors the public.app_role enum (0002_profiles_roles.sql). */
+export type AppRoleColumn = "super_admin" | "trainer" | "student";
+
+/**
+ * Columns of public.profiles exactly as stored. `role` is the ONLY
+ * production source of an application role — see
+ * src/lib/auth/profile-role.ts.
+ */
+export type ProfilesRow = {
+  id: string;
+  role: AppRoleColumn;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * End users have no INSERT/UPDATE privilege on profiles (RLS + grants
+ * in 0002); these shapes exist for type completeness and for trusted
+ * service-role code only.
+ */
+export type ProfilesInsert = {
+  id: string;
+  role?: AppRoleColumn;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ProfilesUpdate = Partial<ProfilesInsert>;
+
 export type Database = {
   public: {
     Tables: {
@@ -88,19 +117,28 @@ export type Database = {
         Update: ClassesUpdate;
         Relationships: [];
       };
+      profiles: {
+        Row: ProfilesRow;
+        Insert: ProfilesInsert;
+        Update: ProfilesUpdate;
+        Relationships: [];
+      };
     };
     Views: {
       [_ in never]: never;
     };
     Functions: {
-      /** Helper used by the classes RLS policies (0001_classes.sql). Takes no arguments. */
+      /**
+       * Caller's role from public.profiles, or NULL (no user / no
+       * profile). Defined in 0001, replaced in 0002_profiles_roles.sql.
+       */
       current_app_role: {
         Args: Record<string, never>;
-        Returns: string;
+        Returns: string | null;
       };
     };
     Enums: {
-      [_ in never]: never;
+      app_role: AppRoleColumn;
     };
     CompositeTypes: {
       [_ in never]: never;
