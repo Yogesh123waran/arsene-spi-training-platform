@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { ClassDetailView } from "@/components/modules/ClassDetailView";
 import { classesService } from "@/services/classes.service";
+import { attendanceService } from "@/services/attendance.service";
+import type { ClassAttendanceRoster } from "@/types/attendance";
 
 export const dynamic = "force-dynamic";
 
@@ -10,5 +12,23 @@ export default async function TrainerClassDetailPage({ params }: { params: { cla
   const trainingClass = await classesService.getClass(params.classId);
   if (!trainingClass) notFound();
 
-  return <ClassDetailView trainingClass={trainingClass} basePath="/trainer/classes" canManage />;
+  // Attendance tab: a load failure only affects the tab, never the page.
+  let attendance: ClassAttendanceRoster | null = null;
+  let attendanceError: string | null = null;
+  try {
+    attendance = await attendanceService.getClassRoster(trainingClass);
+  } catch (err) {
+    console.error("[trainer/classes/detail] attendance load failed:", err instanceof Error ? err.message : err);
+    attendanceError = "Please try again.";
+  }
+
+  return (
+    <ClassDetailView
+      trainingClass={trainingClass}
+      basePath="/trainer/classes"
+      canManage
+      attendance={attendance}
+      attendanceError={attendanceError}
+    />
+  );
 }

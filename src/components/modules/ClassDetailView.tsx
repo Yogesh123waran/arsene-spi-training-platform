@@ -21,12 +21,19 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { formatDate } from "@/utils/format";
 import type { ClassWithRelations } from "@/types/class";
+import type { ClassAttendanceRoster } from "@/types/attendance";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { AttendanceRoster } from "@/components/modules/AttendanceRoster";
 
 export interface ClassDetailViewProps {
   trainingClass: ClassWithRelations;
   /** Route prefix for the back link and edit action, e.g. "/admin/classes". */
   basePath: string;
   canManage?: boolean;
+  /** The class's attendance roster (Supabase mode); omitted → placeholder tab. */
+  attendance?: ClassAttendanceRoster | null;
+  /** Set when the roster failed to load. */
+  attendanceError?: string | null;
 }
 
 function InfoRow({ icon: Icon, label, value }: { icon: typeof BookOpen; label: string; value: string }) {
@@ -43,7 +50,13 @@ function InfoRow({ icon: Icon, label, value }: { icon: typeof BookOpen; label: s
   );
 }
 
-export function ClassDetailView({ trainingClass: c, basePath, canManage = false }: ClassDetailViewProps) {
+export function ClassDetailView({
+  trainingClass: c,
+  basePath,
+  canManage = false,
+  attendance = null,
+  attendanceError = null,
+}: ClassDetailViewProps) {
   // A meeting link is only actionable while the class is still live or upcoming.
   const canJoin = Boolean(c.teamsMeetingUrl) && c.status !== "cancelled" && c.status !== "completed";
 
@@ -119,11 +132,17 @@ export function ClassDetailView({ trainingClass: c, basePath, canManage = false 
             {/* Future-phase sections. Deliberately empty states — no
                 fake upload/record functionality is presented here. */}
             <TabsContent value="attendance">
-              <EmptyState
-                icon={ClipboardCheck}
-                title="Attendance not enabled yet"
-                description="Attendance for this class will appear here once the attendance module is enabled."
-              />
+              {attendanceError ? (
+                <ErrorState title="We couldn't load attendance" description={attendanceError} />
+              ) : attendance ? (
+                <AttendanceRoster roster={attendance} />
+              ) : (
+                <EmptyState
+                  icon={ClipboardCheck}
+                  title="Attendance not enabled yet"
+                  description="Attendance for this class will appear here once the attendance module is enabled."
+                />
+              )}
             </TabsContent>
 
             <TabsContent value="recording">

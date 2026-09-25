@@ -323,6 +323,43 @@ export type BatchStudentsInsert = {
 
 export type BatchStudentsUpdate = Partial<BatchStudentsInsert>;
 
+// -------------------------------------------------------------------
+// Class attendance (0005_class_attendance.sql)
+// -------------------------------------------------------------------
+
+/** Mirrors the public.attendance_status enum. */
+export type AttendanceStatusColumn = "present" | "absent" | "late" | "excused";
+
+/** public.class_attendance — one student's attendance for one class. */
+export type ClassAttendanceRow = {
+  class_id: string;
+  student_id: string;
+  batch_id: string;
+  status: AttendanceStatusColumn;
+  remarks: string | null;
+  marked_by: string;
+  marked_at: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * marked_by / marked_at are always set by the database
+ * (class_attendance_stamp) and are deliberately not insertable from the
+ * client; created_at / updated_at are database-managed too.
+ */
+export type ClassAttendanceInsert = {
+  class_id: string;
+  student_id: string;
+  batch_id: string;
+  status: AttendanceStatusColumn;
+  remarks?: string | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type ClassAttendanceUpdate = Partial<ClassAttendanceInsert>;
+
 export type Database = {
   public: {
     Tables: {
@@ -507,6 +544,41 @@ export type Database = {
           },
         ];
       };
+      class_attendance: {
+        Row: ClassAttendanceRow;
+        Insert: ClassAttendanceInsert;
+        Update: ClassAttendanceUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "class_attendance_class_batch_fk";
+            columns: ["class_id", "batch_id"];
+            isOneToOne: false;
+            referencedRelation: "classes";
+            referencedColumns: ["id", "batch_id"];
+          },
+          {
+            foreignKeyName: "class_attendance_enrolment_fk";
+            columns: ["batch_id", "student_id"];
+            isOneToOne: false;
+            referencedRelation: "batch_students";
+            referencedColumns: ["batch_id", "student_id"];
+          },
+          {
+            foreignKeyName: "class_attendance_student_fk";
+            columns: ["student_id"];
+            isOneToOne: false;
+            referencedRelation: "students";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "class_attendance_marked_by_fkey";
+            columns: ["marked_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -549,6 +621,15 @@ export type Database = {
         Args: { p_student_id: string };
         Returns: boolean;
       };
+      /** RLS helpers (0005). Each answers a question about the caller only. */
+      is_class_trainer: {
+        Args: { p_class_id: string };
+        Returns: boolean;
+      };
+      owns_student_record: {
+        Args: { p_student_id: string };
+        Returns: boolean;
+      };
     };
     Enums: {
       app_role: AppRoleColumn;
@@ -557,6 +638,7 @@ export type Database = {
       course_status: CourseStatusColumn;
       batch_status: BatchStatusColumn;
       enrollment_status: EnrollmentStatusColumn;
+      attendance_status: AttendanceStatusColumn;
     };
     CompositeTypes: {
       [_ in never]: never;

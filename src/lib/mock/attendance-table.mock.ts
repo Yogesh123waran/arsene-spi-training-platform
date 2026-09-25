@@ -1,12 +1,8 @@
-/** PART 3 UI-only mock rows for the Attendance page. */
-export interface AttendanceTableRow {
-  id: string;
-  student: string;
-  batch: string;
-  className: string;
-  date: string;
-  status: "present" | "absent" | "late" | "excused";
-}
+/** PART 3 UI-only mock rows for the Attendance page (demo mode only). */
+import type { AttendanceRow } from "@/types/attendance";
+
+/** Demo-mode attendance row shape — the same view model Supabase mode returns. */
+export type AttendanceTableRow = AttendanceRow;
 
 export const attendanceSummary = {
   present: 92,
