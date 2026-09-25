@@ -24,6 +24,8 @@ import type { ClassWithRelations } from "@/types/class";
 import type { ClassAttendanceRoster } from "@/types/attendance";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { AttendanceRoster } from "@/components/modules/AttendanceRoster";
+import type { ClassAssignmentsPanelData } from "@/types/assignment";
+import { AssignmentsPanel } from "@/components/modules/AssignmentsPanel";
 
 export interface ClassDetailViewProps {
   trainingClass: ClassWithRelations;
@@ -34,6 +36,10 @@ export interface ClassDetailViewProps {
   attendance?: ClassAttendanceRoster | null;
   /** Set when the roster failed to load. */
   attendanceError?: string | null;
+  /** The class's assignments (Supabase mode); omitted → placeholder tab. */
+  assignments?: ClassAssignmentsPanelData | null;
+  /** Set when the assignments failed to load. */
+  assignmentsError?: string | null;
 }
 
 function InfoRow({ icon: Icon, label, value }: { icon: typeof BookOpen; label: string; value: string }) {
@@ -56,6 +62,8 @@ export function ClassDetailView({
   canManage = false,
   attendance = null,
   attendanceError = null,
+  assignments = null,
+  assignmentsError = null,
 }: ClassDetailViewProps) {
   // A meeting link is only actionable while the class is still live or upcoming.
   const canJoin = Boolean(c.teamsMeetingUrl) && c.status !== "cancelled" && c.status !== "completed";
@@ -162,11 +170,17 @@ export function ClassDetailView({
             </TabsContent>
 
             <TabsContent value="assignment">
-              <EmptyState
-                icon={PencilLine}
-                title="No assignment yet"
-                description="Assignments for this class will appear here once the assignment module is enabled."
-              />
+              {assignmentsError ? (
+                <ErrorState title="We couldn't load assignments" description={assignmentsError} />
+              ) : assignments ? (
+                <AssignmentsPanel data={assignments} />
+              ) : (
+                <EmptyState
+                  icon={PencilLine}
+                  title="No assignment yet"
+                  description="Assignments for this class will appear here once the assignment module is enabled."
+                />
+              )}
             </TabsContent>
 
             <TabsContent value="test">

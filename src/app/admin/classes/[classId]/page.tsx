@@ -3,6 +3,8 @@ import { ClassDetailView } from "@/components/modules/ClassDetailView";
 import { classesService } from "@/services/classes.service";
 import { attendanceService } from "@/services/attendance.service";
 import type { ClassAttendanceRoster } from "@/types/attendance";
+import { assignmentsService } from "@/services/assignments.service";
+import type { ClassAssignmentsPanelData } from "@/types/assignment";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +25,16 @@ export default async function AdminClassDetailPage({ params }: { params: { class
     attendanceError = "Please try again.";
   }
 
+  // Assignment tab: same isolation — a failure only affects the tab.
+  let assignments: ClassAssignmentsPanelData | null = null;
+  let assignmentsError: string | null = null;
+  try {
+    assignments = await assignmentsService.getClassPanel(trainingClass);
+  } catch (err) {
+    console.error("[admin/classes/detail] assignments load failed:", err instanceof Error ? err.message : err);
+    assignmentsError = "Please try again.";
+  }
+
   return (
     <ClassDetailView
       trainingClass={trainingClass}
@@ -30,6 +42,8 @@ export default async function AdminClassDetailPage({ params }: { params: { class
       canManage
       attendance={attendance}
       attendanceError={attendanceError}
+      assignments={assignments}
+      assignmentsError={assignmentsError}
     />
   );
 }

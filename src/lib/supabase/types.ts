@@ -360,6 +360,85 @@ export type ClassAttendanceInsert = {
 
 export type ClassAttendanceUpdate = Partial<ClassAttendanceInsert>;
 
+// -------------------------------------------------------------------
+// Assignments (0006_assignments.sql)
+// -------------------------------------------------------------------
+
+/** Mirrors the public.assignment_status / submission_status enums. */
+export type AssignmentStatusColumn = "draft" | "published" | "closed";
+export type SubmissionStatusColumn = "submitted" | "returned";
+
+export type ClassAssignmentsRow = {
+  id: string;
+  class_id: string;
+  batch_id: string;
+  title: string;
+  instructions: string | null;
+  resource_url: string | null;
+  due_at: string | null;
+  max_score: number | null;
+  status: AssignmentStatusColumn;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * created_by / updated_by / created_at / updated_at are stamped by the
+ * database (class_assignments_stamp) and are deliberately not
+ * insertable from the client.
+ */
+export type ClassAssignmentsInsert = {
+  id?: string;
+  class_id: string;
+  batch_id: string;
+  title: string;
+  instructions?: string | null;
+  resource_url?: string | null;
+  due_at?: string | null;
+  max_score?: number | null;
+  status?: AssignmentStatusColumn;
+};
+
+export type ClassAssignmentsUpdate = Partial<ClassAssignmentsInsert>;
+
+export type AssignmentSubmissionsRow = {
+  assignment_id: string;
+  student_id: string;
+  batch_id: string;
+  submission_url: string;
+  note: string | null;
+  status: SubmissionStatusColumn;
+  submitted_at: string;
+  score: number | null;
+  feedback: string | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * submitted_at / reviewed_by / reviewed_at / created_at / updated_at are
+ * stamped by the database (assignment_submissions_guard) and are
+ * deliberately not insertable from the client. status/score/feedback
+ * are review fields: the guard forces them on insert and only honours
+ * them from trainers/admins on update.
+ */
+export type AssignmentSubmissionsInsert = {
+  assignment_id: string;
+  student_id: string;
+  batch_id: string;
+  submission_url: string;
+  note?: string | null;
+  status?: SubmissionStatusColumn;
+  score?: number | null;
+  feedback?: string | null;
+};
+
+export type AssignmentSubmissionsUpdate = Partial<AssignmentSubmissionsInsert>;
+
 export type Database = {
   public: {
     Tables: {
@@ -579,6 +658,69 @@ export type Database = {
           },
         ];
       };
+      class_assignments: {
+        Row: ClassAssignmentsRow;
+        Insert: ClassAssignmentsInsert;
+        Update: ClassAssignmentsUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "class_assignments_class_batch_fk";
+            columns: ["class_id", "batch_id"];
+            isOneToOne: false;
+            referencedRelation: "classes";
+            referencedColumns: ["id", "batch_id"];
+          },
+          {
+            foreignKeyName: "class_assignments_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "class_assignments_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      assignment_submissions: {
+        Row: AssignmentSubmissionsRow;
+        Insert: AssignmentSubmissionsInsert;
+        Update: AssignmentSubmissionsUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "assignment_submissions_assignment_batch_fk";
+            columns: ["assignment_id", "batch_id"];
+            isOneToOne: false;
+            referencedRelation: "class_assignments";
+            referencedColumns: ["id", "batch_id"];
+          },
+          {
+            foreignKeyName: "assignment_submissions_enrolment_fk";
+            columns: ["batch_id", "student_id"];
+            isOneToOne: false;
+            referencedRelation: "batch_students";
+            referencedColumns: ["batch_id", "student_id"];
+          },
+          {
+            foreignKeyName: "assignment_submissions_student_fk";
+            columns: ["student_id"];
+            isOneToOne: false;
+            referencedRelation: "students";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "assignment_submissions_reviewed_by_fkey";
+            columns: ["reviewed_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -639,6 +781,8 @@ export type Database = {
       batch_status: BatchStatusColumn;
       enrollment_status: EnrollmentStatusColumn;
       attendance_status: AttendanceStatusColumn;
+      assignment_status: AssignmentStatusColumn;
+      submission_status: SubmissionStatusColumn;
     };
     CompositeTypes: {
       [_ in never]: never;
