@@ -1,12 +1,31 @@
 import { PageHeader } from "@/components/layout/PageHeader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { CoursesGrid } from "@/components/modules/CoursesGrid";
-import { getEnrolledCourses } from "@/lib/mock/courses-table.mock";
+import { coursesService } from "@/services/courses.service";
+import type { CourseSummary } from "@/types/course";
 
-export default function StudentCoursesPage() {
+export const dynamic = "force-dynamic";
+
+export default async function StudentCoursesPage() {
+  let courses: CourseSummary[] = [];
+  let loadError: string | null = null;
+
+  try {
+    // Scoped server-side to the student's enrolled batches' courses.
+    courses = await coursesService.listCourses();
+  } catch (err) {
+    console.error("[student/courses] load failed:", err instanceof Error ? err.message : err);
+    loadError = "We couldn't load your courses. Please try again.";
+  }
+
   return (
     <div>
       <PageHeader title="My Courses" description="Courses you're currently enrolled in." />
-      <CoursesGrid courses={getEnrolledCourses()} basePath="/student/courses" />
+      {loadError ? (
+        <ErrorState title="We couldn't load your courses" description={loadError} />
+      ) : (
+        <CoursesGrid courses={courses} basePath="/student/courses" />
+      )}
     </div>
   );
 }

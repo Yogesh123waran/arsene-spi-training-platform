@@ -5,10 +5,10 @@ import { Search } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
-import type { CourseCardData } from "@/lib/mock/courses-table.mock";
+import type { CourseSummary } from "@/types/course";
 import { CourseCard } from "@/components/modules/CourseCard";
 
-export function CoursesGrid({ courses, basePath = "/admin/courses" }: { courses: CourseCardData[]; basePath?: string }) {
+export function CoursesGrid({ courses, basePath = "/admin/courses" }: { courses: CourseSummary[]; basePath?: string }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
 

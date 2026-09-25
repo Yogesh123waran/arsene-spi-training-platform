@@ -1,10 +1,24 @@
 import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
-import { courseCards } from "@/lib/mock/courses-table.mock";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { CoursesGrid } from "@/components/modules/CoursesGrid";
+import { coursesService } from "@/services/courses.service";
+import type { CourseSummary } from "@/types/course";
 
-export default function AdminCoursesPage() {
+export const dynamic = "force-dynamic";
+
+export default async function AdminCoursesPage() {
+  let courses: CourseSummary[] = [];
+  let loadError: string | null = null;
+
+  try {
+    courses = await coursesService.listCourses();
+  } catch (err) {
+    console.error("[admin/courses] load failed:", err instanceof Error ? err.message : err);
+    loadError = "We couldn't load the courses. Please try again.";
+  }
+
   return (
     <div>
       <PageHeader
@@ -16,7 +30,11 @@ export default function AdminCoursesPage() {
           </Button>
         }
       />
-      <CoursesGrid courses={courseCards} />
+      {loadError ? (
+        <ErrorState title="We couldn't load the courses" description={loadError} />
+      ) : (
+        <CoursesGrid courses={courses} />
+      )}
     </div>
   );
 }

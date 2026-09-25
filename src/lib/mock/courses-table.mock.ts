@@ -3,17 +3,10 @@
  * students-table.mock.ts — this is presentation data only, kept
  * separate from the future courses repository.
  */
-export interface CourseCardData {
-  id: string;
-  title: string;
-  description: string;
-  modules: number;
-  topics: number;
-  durationHours: number;
-  trainer: string;
-  progress: number;
-  status: "published" | "draft" | "archived";
-}
+import type { CourseSummary } from "@/types/course";
+
+/** Demo-mode course card shape — the same view model Supabase mode returns. */
+export type CourseCardData = CourseSummary;
 
 export const courseCards: CourseCardData[] = [
   {
@@ -89,5 +82,5 @@ export function getCoursesForTrainer(trainerName: string): CourseCardData[] {
 }
 
 export function getEnrolledCourses(): CourseCardData[] {
-  return courseCards.filter((c) => c.progress > 0);
+  return courseCards.filter((c) => (c.progress ?? 0) > 0);
 }

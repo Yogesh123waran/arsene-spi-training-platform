@@ -1,22 +1,9 @@
 /** PART 3 UI-only mock detail data for a single course (course detail layout). */
-export interface CourseModuleRow {
-  id: string;
-  sequence: number;
-  title: string;
-  topics: number;
-  status: "completed" | "in_progress" | "not_started";
-}
+import type { CourseDetail, CourseDetailModule } from "@/types/course";
 
-export interface CourseDetailData {
-  id: string;
-  title: string;
-  description: string;
-  modules: CourseModuleRow[];
-  progress: number;
-  trainer: string;
-  durationHours: number;
-  topics: number;
-}
+/** Demo-mode detail shapes — the same view models Supabase mode returns. */
+export type CourseModuleRow = CourseDetailModule;
+export type CourseDetailData = CourseDetail;
 
 export const courseDetails: Record<string, CourseDetailData> = {
   crs_001: {

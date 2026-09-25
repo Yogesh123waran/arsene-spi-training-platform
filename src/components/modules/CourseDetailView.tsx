@@ -7,10 +7,11 @@ import { ProgressBar } from "@/components/ui/ProgressBar";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/Tabs";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { courseDetails, defaultCourseDetail } from "@/lib/mock/course-detail.mock";
+import type { CourseDetail } from "@/types/course";
 
 export interface CourseDetailViewProps {
-  courseId: string;
+  /** The course, already loaded (and access-checked) by the page via coursesService. */
+  course: CourseDetail;
   /** Where "Back to courses" and the surrounding portal point — e.g. "/admin/courses". */
   backHref: string;
 }
@@ -18,11 +19,15 @@ export interface CourseDetailViewProps {
 /**
  * Shared course detail layout (Course Header → Information → Modules →
  * Classes → Materials → Tests → Progress) used by /admin, /trainer and
- * /student course detail routes. Each portal's page.tsx just supplies
- * the courseId param and its own back-link.
+ * /student course detail routes. Each portal's page.tsx loads the
+ * course and supplies its own back-link.
+ *
+ * Topics, overall progress and per-module status have no data source
+ * in Supabase mode yet (undefined) and are hidden until they do.
  */
-export function CourseDetailView({ courseId, backHref }: CourseDetailViewProps) {
-  const course = courseDetails[courseId] ?? defaultCourseDetail;
+export function CourseDetailView({ course, backHref }: CourseDetailViewProps) {
+  const hasProgress = course.progress !== undefined;
+  const progress = course.progress ?? 0;
 
   return (
     <div>
@@ -33,7 +38,7 @@ export function CourseDetailView({ courseId, backHref }: CourseDetailViewProps) 
       <PageHeader
         title={course.title}
         description={course.description}
-        actions={<Button size="sm">{course.progress > 0 ? "Continue" : "Start Course"}</Button>}
+        actions={<Button size="sm">{progress > 0 ? "Continue" : "Start Course"}</Button>}
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_260px]">
@@ -42,9 +47,11 @@ export function CourseDetailView({ courseId, backHref }: CourseDetailViewProps) 
             <span className="flex items-center gap-1.5">
               <Layers className="h-4 w-4" /> {course.modules.length} Modules
             </span>
-            <span className="flex items-center gap-1.5">
-              <BookOpen className="h-4 w-4" /> {course.topics} Topics
-            </span>
+            {course.topics !== undefined && (
+              <span className="flex items-center gap-1.5">
+                <BookOpen className="h-4 w-4" /> {course.topics} Topics
+              </span>
+            )}
             <span className="flex items-center gap-1.5">
               <Clock className="h-4 w-4" /> {course.durationHours} Hours
             </span>
@@ -71,13 +78,21 @@ export function CourseDetailView({ courseId, backHref }: CourseDetailViewProps) 
                         <p className="text-sm font-medium text-ink">
                           {m.sequence}. {m.title}
                         </p>
-                        <p className="text-xs text-ink-muted">{m.topics} topics</p>
+                        {m.topics !== undefined && <p className="text-xs text-ink-muted">{m.topics} topics</p>}
                       </div>
                       <div className="flex shrink-0 items-center gap-3">
-                        <StatusBadge status={m.status} />
-                        <Button size="sm" variant={m.status === "not_started" ? "secondary" : "primary"}>
-                          {m.status === "completed" ? "View" : m.status === "in_progress" ? "Continue" : "Start"}
-                        </Button>
+                        {m.status ? (
+                          <>
+                            <StatusBadge status={m.status} />
+                            <Button size="sm" variant={m.status === "not_started" ? "secondary" : "primary"}>
+                              {m.status === "completed" ? "View" : m.status === "in_progress" ? "Continue" : "Start"}
+                            </Button>
+                          </>
+                        ) : (
+                          <Button size="sm" variant="secondary">
+                            View
+                          </Button>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -102,31 +117,41 @@ export function CourseDetailView({ courseId, backHref }: CourseDetailViewProps) 
             </TabsContent>
 
             <TabsContent value="progress">
-              <Card>
-                <CardContent className="flex flex-col gap-4">
-                  <ProgressBar value={course.progress} tone="teal" label="Overall course progress" />
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    {course.modules.map((m) => (
-                      <div key={m.id} className="rounded-lg border border-surface-border p-3 text-center">
-                        <p className="text-xs text-ink-muted">Module {m.sequence}</p>
-                        <StatusBadge status={m.status} className="mt-1.5" />
-                      </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
+              {hasProgress ? (
+                <Card>
+                  <CardContent className="flex flex-col gap-4">
+                    <ProgressBar value={progress} tone="teal" label="Overall course progress" />
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {course.modules.map((m) => (
+                        <div key={m.id} className="rounded-lg border border-surface-border p-3 text-center">
+                          <p className="text-xs text-ink-muted">Module {m.sequence}</p>
+                          {m.status && <StatusBadge status={m.status} className="mt-1.5" />}
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : (
+                <EmptyState
+                  icon={LineChart}
+                  title="Progress isn't tracked yet"
+                  description="Course progress will appear here once attendance and test results are recorded."
+                />
+              )}
             </TabsContent>
           </Tabs>
         </div>
 
         <Card className="h-fit">
           <CardContent className="flex flex-col gap-4">
-            <div>
-              <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                <LineChart className="h-3.5 w-3.5" /> Your progress
-              </p>
-              <ProgressBar value={course.progress} tone="teal" />
-            </div>
+            {hasProgress && (
+              <div>
+                <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-ink-muted">
+                  <LineChart className="h-3.5 w-3.5" /> Your progress
+                </p>
+                <ProgressBar value={progress} tone="teal" />
+              </div>
+            )}
             <div className="flex flex-col gap-2 text-xs text-ink-muted">
               <div className="flex justify-between">
                 <span>Trainer</span>

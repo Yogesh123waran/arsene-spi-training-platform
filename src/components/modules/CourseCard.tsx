@@ -4,9 +4,12 @@ import { Card, CardContent, CardFooter } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ProgressBar } from "@/components/ui/ProgressBar";
-import type { CourseCardData } from "@/lib/mock/courses-table.mock";
+import type { CourseSummary } from "@/types/course";
 
-export function CourseCard({ course, basePath = "/admin/courses" }: { course: CourseCardData; basePath?: string }) {
+export function CourseCard({ course, basePath = "/admin/courses" }: { course: CourseSummary; basePath?: string }) {
+  // Progress has no data source in Supabase mode yet (undefined → hidden).
+  const progress = course.progress ?? 0;
+
   return (
     <Card className="flex flex-col overflow-hidden">
       <div className="bg-drafting relative flex h-28 items-center justify-center bg-panel">
@@ -24,9 +27,11 @@ export function CourseCard({ course, basePath = "/admin/courses" }: { course: Co
           <span className="flex items-center gap-1">
             <Layers className="h-3.5 w-3.5" /> {course.modules} Modules
           </span>
-          <span className="flex items-center gap-1">
-            <ListChecks className="h-3.5 w-3.5" /> {course.topics} Topics
-          </span>
+          {course.topics !== undefined && (
+            <span className="flex items-center gap-1">
+              <ListChecks className="h-3.5 w-3.5" /> {course.topics} Topics
+            </span>
+          )}
           <span className="flex items-center gap-1">
             <Clock className="h-3.5 w-3.5" /> {course.durationHours} Hours
           </span>
@@ -36,13 +41,13 @@ export function CourseCard({ course, basePath = "/admin/courses" }: { course: Co
           <UserRound className="h-3.5 w-3.5" /> {course.trainer}
         </span>
 
-        {course.progress > 0 && <ProgressBar value={course.progress} tone="teal" label="Progress" />}
+        {progress > 0 && <ProgressBar value={progress} tone="teal" label="Progress" />}
       </CardContent>
 
       <CardFooter>
         <Link href={`${basePath}/${course.id}`} className="w-full">
-          <Button variant={course.progress > 0 ? "primary" : "secondary"} size="sm" className="w-full">
-            {course.progress > 0 ? "Continue" : "View"}
+          <Button variant={progress > 0 ? "primary" : "secondary"} size="sm" className="w-full">
+            {progress > 0 ? "Continue" : "View"}
           </Button>
         </Link>
       </CardFooter>
