@@ -5,5 +5,6 @@ export * from "./auth.service";
 export * from "./classes.service";
 export * from "./courses.service";
 export * from "./trainers.service";
+export * from "./batches.service";
 // Note: classes.actions.ts ("use server") is imported directly by the
 // client components that call it, not re-exported here.

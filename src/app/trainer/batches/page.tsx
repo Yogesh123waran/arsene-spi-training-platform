@@ -1,14 +1,31 @@
 import { PageHeader } from "@/components/layout/PageHeader";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { BatchesTable } from "@/components/modules/BatchesTable";
-import { getBatchesForTrainer } from "@/lib/mock/batches-table.mock";
+import { batchesService } from "@/services/batches.service";
+import type { BatchSummary } from "@/types/batch";
 
-const TRAINER_NAME = "Rajesh Kumar";
+export const dynamic = "force-dynamic";
 
-export default function TrainerBatchesPage() {
+export default async function TrainerBatchesPage() {
+  let batches: BatchSummary[] = [];
+  let loadError: string | null = null;
+
+  try {
+    // batchesService scopes this to the signed-in trainer's assigned batches, server-side.
+    batches = await batchesService.listBatches();
+  } catch (err) {
+    console.error("[trainer/batches] load failed:", err instanceof Error ? err.message : err);
+    loadError = "We couldn't load your batches. Please try again.";
+  }
+
   return (
     <div>
       <PageHeader title="My Batches" description="Batches you're assigned to train." />
-      <BatchesTable rows={getBatchesForTrainer(TRAINER_NAME)} />
+      {loadError ? (
+        <ErrorState title="We couldn't load your batches" description={loadError} />
+      ) : (
+        <BatchesTable rows={batches} />
+      )}
     </div>
   );
 }

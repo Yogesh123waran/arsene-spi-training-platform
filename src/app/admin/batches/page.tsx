@@ -1,10 +1,24 @@
 import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
-import { batchTableRows } from "@/lib/mock/batches-table.mock";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { BatchesTable } from "@/components/modules/BatchesTable";
+import { batchesService } from "@/services/batches.service";
+import type { BatchSummary } from "@/types/batch";
 
-export default function AdminBatchesPage() {
+export const dynamic = "force-dynamic";
+
+export default async function AdminBatchesPage() {
+  let batches: BatchSummary[] = [];
+  let loadError: string | null = null;
+
+  try {
+    batches = await batchesService.listBatches();
+  } catch (err) {
+    console.error("[admin/batches] load failed:", err instanceof Error ? err.message : err);
+    loadError = "We couldn't load the batches. Please try again.";
+  }
+
   return (
     <div>
       <PageHeader
@@ -16,7 +30,11 @@ export default function AdminBatchesPage() {
           </Button>
         }
       />
-      <BatchesTable rows={batchTableRows} />
+      {loadError ? (
+        <ErrorState title="We couldn't load the batches" description={loadError} />
+      ) : (
+        <BatchesTable rows={batches} />
+      )}
     </div>
   );
 }

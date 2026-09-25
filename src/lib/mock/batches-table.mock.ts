@@ -1,15 +1,8 @@
 /** PART 3 UI-only mock rows for the Batches page. */
-export interface BatchTableRow {
-  id: string;
-  name: string;
-  course: string;
-  trainer: string;
-  students: number;
-  maxSeats: number;
-  startDate: string;
-  endDate: string;
-  status: "upcoming" | "ongoing" | "completed" | "cancelled";
-}
+import type { BatchSummary } from "@/types/batch";
+
+/** Demo-mode batch row shape — the same view model Supabase mode returns. */
+export type BatchTableRow = BatchSummary;
 
 export const batchTableRows: BatchTableRow[] = [
   { id: "bat_001", name: "Batch A", course: "Instrumentation Basics", trainer: "Rajesh Kumar", students: 28, maxSeats: 30, startDate: "2026-01-12", endDate: "2026-03-06", status: "ongoing" },

@@ -18,11 +18,11 @@ import { Pagination } from "@/components/ui/Pagination";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
 import { formatDate } from "@/utils/format";
-import type { BatchTableRow } from "@/lib/mock/batches-table.mock";
+import type { BatchSummary } from "@/types/batch";
 
 const PAGE_SIZE = 5;
 
-export function BatchesTable({ rows }: { rows: BatchTableRow[] }) {
+export function BatchesTable({ rows }: { rows: BatchSummary[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(1);
