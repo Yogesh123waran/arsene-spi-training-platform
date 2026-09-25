@@ -6,16 +6,10 @@
  * don't belong on the core Student entity yet. Replace with a real
  * query once the students module has a backing table.
  */
-export interface StudentTableRow {
-  id: string;
-  name: string;
-  email: string;
-  batch: string;
-  course: string;
-  attendance: number;
-  performance: number;
-  status: "active" | "inactive" | "invited";
-}
+import type { StudentSummary } from "@/types/student";
+
+/** Demo-mode student row shape — the same view model Supabase mode returns. */
+export type StudentTableRow = StudentSummary;
 
 export const studentTableRows: StudentTableRow[] = [
   { id: "std_001", name: "Arun Kumar", email: "arun.kumar@example.com", batch: "Batch A", course: "Instrumentation Basics", attendance: 94, performance: 88, status: "active" },

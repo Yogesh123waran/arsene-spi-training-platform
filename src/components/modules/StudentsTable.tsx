@@ -19,11 +19,11 @@ import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { Pagination } from "@/components/ui/Pagination";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
-import type { StudentTableRow } from "@/lib/mock/students-table.mock";
+import type { StudentSummary } from "@/types/student";
 
 const PAGE_SIZE = 5;
 
-export function StudentsTable({ rows }: { rows: StudentTableRow[] }) {
+export function StudentsTable({ rows }: { rows: StudentSummary[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(1);
@@ -108,14 +108,14 @@ export function StudentsTable({ rows }: { rows: StudentTableRow[] }) {
                 <TableCell>{s.batch}</TableCell>
                 <TableCell>{s.course}</TableCell>
                 <TableCell className="w-32">
-                  {s.attendance > 0 ? (
+                  {s.attendance !== undefined && s.attendance > 0 ? (
                     <ProgressBar value={s.attendance} tone={s.attendance >= 85 ? "teal" : s.attendance >= 70 ? "amber" : "red"} />
                   ) : (
                     <span className="text-xs text-ink-faint">—</span>
                   )}
                 </TableCell>
                 <TableCell className="w-32">
-                  {s.performance > 0 ? (
+                  {s.performance !== undefined && s.performance > 0 ? (
                     <ProgressBar value={s.performance} tone={s.performance >= 85 ? "teal" : s.performance >= 70 ? "amber" : "red"} />
                   ) : (
                     <span className="text-xs text-ink-faint">—</span>

@@ -31,3 +31,24 @@ export interface Student {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * A student as shown in the Students table (admin and trainer). Built
+ * from public.students + student_details + current enrolments
+ * (Supabase mode), or from the demo data (demo mode).
+ */
+export interface StudentSummary {
+  id: string;
+  name: string;
+  /** student_details.email; empty when unavailable (e.g. trainers can't read it). */
+  email: string;
+  /** Current batches (enrolled, non-cancelled), joined — or "—" when none. */
+  batch: string;
+  /** Courses of those current batches, joined — or "—" when none. */
+  course: string;
+  /** No data source yet in Supabase mode (needs Attendance) — undefined shows "—". */
+  attendance?: number;
+  /** No data source yet in Supabase mode (needs Tests) — undefined shows "—". */
+  performance?: number;
+  status: UserStatus;
+}
