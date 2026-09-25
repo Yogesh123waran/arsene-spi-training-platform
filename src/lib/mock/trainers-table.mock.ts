@@ -3,15 +3,10 @@
  * in students-table.mock.ts — presentation data only, kept separate
  * from the future trainers repository.
  */
-export interface TrainerTableRow {
-  id: string;
-  name: string;
-  email: string;
-  courses: string[];
-  batches: string[];
-  students: number;
-  status: "active" | "inactive" | "invited";
-}
+import type { TrainerSummary } from "@/types/trainer";
+
+/** Demo-mode trainer row shape — the same view model Supabase mode returns. */
+export type TrainerTableRow = TrainerSummary;
 
 export const trainerTableRows: TrainerTableRow[] = [
   { id: "trn_001", name: "Rajesh Kumar", email: "rajesh.kumar@arsene-tech.example", courses: ["Instrumentation Basics", "P&ID Fundamentals"], batches: ["Batch A"], students: 28, status: "active" },

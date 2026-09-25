@@ -19,11 +19,11 @@ import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { Pagination } from "@/components/ui/Pagination";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
-import type { TrainerTableRow } from "@/lib/mock/trainers-table.mock";
+import type { TrainerSummary } from "@/types/trainer";
 
 const PAGE_SIZE = 5;
 
-export function TrainersTable({ rows }: { rows: TrainerTableRow[] }) {
+export function TrainersTable({ rows }: { rows: TrainerSummary[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(1);
