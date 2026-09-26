@@ -1,26 +1,32 @@
-import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { Button } from "@/components/ui/Button";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { QuestionsView } from "@/components/modules/QuestionsView";
-import { getQuestionsForCourse } from "@/lib/mock/questions-table.mock";
+import { questionsService } from "@/services/questions.service";
+import type { QuestionBankData } from "@/types/question";
 
-const TRAINER_COURSES = ["Instrumentation Basics", "Control Systems"];
+export const dynamic = "force-dynamic";
 
-export default function TrainerQuestionsPage() {
-  const questions = TRAINER_COURSES.flatMap((course) => getQuestionsForCourse(course));
+export default async function TrainerQuestionsPage() {
+  let data: QuestionBankData | null = null;
+  let loadError: string | null = null;
+
+  try {
+    // questionsService scopes this server-side to courses the signed-in
+    // trainer currently teaches (upcoming/ongoing batches); RLS enforces the same.
+    data = await questionsService.getBankData();
+  } catch (err) {
+    console.error("[trainer/questions] load failed:", err instanceof Error ? err.message : err);
+    loadError = "We couldn't load the Question Bank. Please try again.";
+  }
 
   return (
     <div>
-      <PageHeader
-        title="Question Bank"
-        description="Manage questions for your assigned courses."
-        actions={
-          <Button size="sm">
-            <Plus className="h-4 w-4" /> Add Question
-          </Button>
-        }
-      />
-      <QuestionsView questions={questions} />
+      <PageHeader title="Question Bank" description="Manage questions for the courses you currently teach." />
+      {loadError || !data ? (
+        <ErrorState title="We couldn't load the Question Bank" description={loadError ?? "Please try again."} />
+      ) : (
+        <QuestionsView data={data} />
+      )}
     </div>
   );
 }

@@ -439,6 +439,69 @@ export type AssignmentSubmissionsInsert = {
 
 export type AssignmentSubmissionsUpdate = Partial<AssignmentSubmissionsInsert>;
 
+// -------------------------------------------------------------------
+// Question bank (0007_question_bank.sql)
+// -------------------------------------------------------------------
+
+/** Mirrors the public.question_type / question_status enums. */
+export type QuestionTypeColumn = "single_choice" | "multiple_choice" | "true_false";
+export type QuestionStatusColumn = "draft" | "active" | "archived";
+
+export type QuestionsRow = {
+  id: string;
+  course_id: string;
+  module_id: string | null;
+  question_text: string;
+  question_type: QuestionTypeColumn;
+  marks: number;
+  status: QuestionStatusColumn;
+  explanation: string | null;
+  revision: number;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * Authenticated users have NO insert/update privilege on questions or
+ * question_options: every write goes through the save_question /
+ * set_question_status database functions (see Functions below), and
+ * created_by / updated_by / revision / timestamps are stamped by the
+ * database. These shapes exist only to satisfy the Database type.
+ */
+export type QuestionsInsert = {
+  id?: string;
+  course_id: string;
+  module_id?: string | null;
+  question_text: string;
+  question_type: QuestionTypeColumn;
+  marks: number;
+  status?: QuestionStatusColumn;
+  explanation?: string | null;
+};
+
+export type QuestionsUpdate = Partial<QuestionsInsert>;
+
+/** is_correct is the answer key — staff-only (no student RLS policy). */
+export type QuestionOptionsRow = {
+  id: string;
+  question_id: string;
+  option_text: string;
+  display_order: number;
+  is_correct: boolean;
+};
+
+export type QuestionOptionsInsert = {
+  id?: string;
+  question_id: string;
+  option_text: string;
+  display_order: number;
+  is_correct: boolean;
+};
+
+export type QuestionOptionsUpdate = Partial<QuestionOptionsInsert>;
+
 export type Database = {
   public: {
     Tables: {
@@ -721,6 +784,55 @@ export type Database = {
           },
         ];
       };
+      questions: {
+        Row: QuestionsRow;
+        Insert: QuestionsInsert;
+        Update: QuestionsUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "questions_course_fk";
+            columns: ["course_id"];
+            isOneToOne: false;
+            referencedRelation: "courses";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "questions_module_course_fk";
+            columns: ["module_id", "course_id"];
+            isOneToOne: false;
+            referencedRelation: "modules";
+            referencedColumns: ["id", "course_id"];
+          },
+          {
+            foreignKeyName: "questions_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "questions_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      question_options: {
+        Row: QuestionOptionsRow;
+        Insert: QuestionOptionsInsert;
+        Update: QuestionOptionsUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "question_options_question_fk";
+            columns: ["question_id"];
+            isOneToOne: false;
+            referencedRelation: "questions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -772,6 +884,20 @@ export type Database = {
         Args: { p_student_id: string };
         Returns: boolean;
       };
+      /** Question bank (0007). Caller is a CURRENT trainer (upcoming/ongoing batch) of the course. */
+      is_course_trainer: {
+        Args: { p_course_id: string };
+        Returns: boolean;
+      };
+      /** Atomic create/update of a question + all its options; returns the question id. */
+      save_question: {
+        Args: { payload: Json };
+        Returns: string;
+      };
+      set_question_status: {
+        Args: { p_question_id: string; p_status: QuestionStatusColumn };
+        Returns: undefined;
+      };
     };
     Enums: {
       app_role: AppRoleColumn;
@@ -783,6 +909,8 @@ export type Database = {
       attendance_status: AttendanceStatusColumn;
       assignment_status: AssignmentStatusColumn;
       submission_status: SubmissionStatusColumn;
+      question_type: QuestionTypeColumn;
+      question_status: QuestionStatusColumn;
     };
     CompositeTypes: {
       [_ in never]: never;

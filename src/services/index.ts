@@ -12,5 +12,8 @@ export * from "./attendance.service";
 export * from "./assignments.service";
 // Note: assignments.actions.ts ("use server") is imported directly by the
 // client components that call it, not re-exported here.
+export * from "./questions.service";
+// Note: questions.actions.ts ("use server") is imported directly by the
+// client components that call it, not re-exported here.
 // Note: classes.actions.ts ("use server") is imported directly by the
 // client components that call it, not re-exported here.
