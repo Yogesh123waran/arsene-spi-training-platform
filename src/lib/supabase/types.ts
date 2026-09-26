@@ -502,6 +502,108 @@ export type QuestionOptionsInsert = {
 
 export type QuestionOptionsUpdate = Partial<QuestionOptionsInsert>;
 
+// -------------------------------------------------------------------
+// Class tests (0008_tests.sql)
+// -------------------------------------------------------------------
+
+/** Mirrors the public.test_type / test_status enums. */
+export type TestTypeColumn = "quiz" | "module_test" | "final_exam" | "practical";
+export type TestStatusColumn = "draft" | "scheduled" | "active" | "closed";
+
+export type TestsRow = {
+  id: string;
+  class_id: string;
+  batch_id: string;
+  test_type: TestTypeColumn;
+  title: string;
+  instructions: string | null;
+  status: TestStatusColumn;
+  pass_mark_percent: number | null;
+  time_limit_minutes: number | null;
+  attempt_limit: number;
+  available_from: string | null;
+  available_until: string | null;
+  created_by: string;
+  updated_by: string;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * created_by / updated_by / created_at / updated_at are stamped by the
+ * database (tests_stamp) and are deliberately not insertable from the
+ * client. status is validated and normalised by tests_validate.
+ */
+export type TestsInsert = {
+  id?: string;
+  class_id: string;
+  batch_id: string;
+  test_type: TestTypeColumn;
+  title: string;
+  instructions?: string | null;
+  status?: TestStatusColumn;
+  pass_mark_percent?: number | null;
+  time_limit_minutes?: number | null;
+  attempt_limit?: number;
+  available_from?: string | null;
+  available_until?: string | null;
+};
+
+export type TestsUpdate = Partial<TestsInsert>;
+
+/**
+ * Frozen question copy. Authenticated users have SELECT only (staff,
+ * via RLS); rows are written only by add_test_questions /
+ * remove_test_question. The Insert shapes exist only to satisfy the
+ * Database type.
+ */
+export type TestQuestionsRow = {
+  id: string;
+  test_id: string;
+  position: number;
+  source_question_id: string;
+  source_revision: number;
+  question_text: string;
+  question_type: QuestionTypeColumn;
+  marks: number;
+  explanation: string | null;
+  added_by: string;
+  added_at: string;
+};
+
+export type TestQuestionsInsert = {
+  id?: string;
+  test_id: string;
+  position: number;
+  source_question_id: string;
+  source_revision: number;
+  question_text: string;
+  question_type: QuestionTypeColumn;
+  marks: number;
+  explanation?: string | null;
+};
+
+export type TestQuestionsUpdate = Partial<TestQuestionsInsert>;
+
+/** is_correct is the frozen answer key — staff-only (no student RLS policy). */
+export type TestQuestionOptionsRow = {
+  id: string;
+  test_question_id: string;
+  option_text: string;
+  display_order: number;
+  is_correct: boolean;
+};
+
+export type TestQuestionOptionsInsert = {
+  id?: string;
+  test_question_id: string;
+  option_text: string;
+  display_order: number;
+  is_correct: boolean;
+};
+
+export type TestQuestionOptionsUpdate = Partial<TestQuestionOptionsInsert>;
+
 export type Database = {
   public: {
     Tables: {
@@ -833,6 +935,76 @@ export type Database = {
           },
         ];
       };
+      tests: {
+        Row: TestsRow;
+        Insert: TestsInsert;
+        Update: TestsUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "tests_class_batch_fk";
+            columns: ["class_id", "batch_id"];
+            isOneToOne: false;
+            referencedRelation: "classes";
+            referencedColumns: ["id", "batch_id"];
+          },
+          {
+            foreignKeyName: "tests_created_by_fkey";
+            columns: ["created_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "tests_updated_by_fkey";
+            columns: ["updated_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      test_questions: {
+        Row: TestQuestionsRow;
+        Insert: TestQuestionsInsert;
+        Update: TestQuestionsUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "test_questions_test_fk";
+            columns: ["test_id"];
+            isOneToOne: false;
+            referencedRelation: "tests";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "test_questions_source_fk";
+            columns: ["source_question_id"];
+            isOneToOne: false;
+            referencedRelation: "questions";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "test_questions_added_by_fkey";
+            columns: ["added_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      test_question_options: {
+        Row: TestQuestionOptionsRow;
+        Insert: TestQuestionOptionsInsert;
+        Update: TestQuestionOptionsUpdate;
+        Relationships: [
+          {
+            foreignKeyName: "test_question_options_question_fk";
+            columns: ["test_question_id"];
+            isOneToOne: false;
+            referencedRelation: "test_questions";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -898,6 +1070,24 @@ export type Database = {
         Args: { p_question_id: string; p_status: QuestionStatusColumn };
         Returns: undefined;
       };
+      /** Class tests (0008). Caller is the CURRENT trainer (upcoming/ongoing) of the batch. */
+      is_current_batch_trainer: {
+        Args: { p_batch_id: string };
+        Returns: boolean;
+      };
+      test_effective_status: {
+        Args: { p_status: TestStatusColumn; p_available_from: string | null; p_available_until: string | null };
+        Returns: TestStatusColumn;
+      };
+      /** Copies active bank questions (server-side) into a draft test; returns how many were added. */
+      add_test_questions: {
+        Args: { p_test_id: string; p_question_ids: string[] };
+        Returns: number;
+      };
+      remove_test_question: {
+        Args: { p_test_question_id: string };
+        Returns: undefined;
+      };
     };
     Enums: {
       app_role: AppRoleColumn;
@@ -911,6 +1101,8 @@ export type Database = {
       submission_status: SubmissionStatusColumn;
       question_type: QuestionTypeColumn;
       question_status: QuestionStatusColumn;
+      test_type: TestTypeColumn;
+      test_status: TestStatusColumn;
     };
     CompositeTypes: {
       [_ in never]: never;

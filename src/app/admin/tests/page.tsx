@@ -1,22 +1,31 @@
-import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { Button } from "@/components/ui/Button";
-import { testCards } from "@/lib/mock/tests.mock";
+import { ErrorState } from "@/components/ui/ErrorState";
 import { TestsGrid } from "@/components/modules/TestsGrid";
+import { testsService } from "@/services/tests.service";
+import type { TestManagementData } from "@/types/test";
 
-export default function AdminTestsPage() {
+export const dynamic = "force-dynamic";
+
+export default async function AdminTestsPage() {
+  let data: TestManagementData | null = null;
+  let loadError: string | null = null;
+
+  try {
+    // Super admin: every test and class (RLS enforces the same).
+    data = await testsService.getManagementData();
+  } catch (err) {
+    console.error("[admin/tests] load failed:", err instanceof Error ? err.message : err);
+    loadError = "We couldn't load tests. Please try again.";
+  }
+
   return (
     <div>
-      <PageHeader
-        title="Tests"
-        description="Create, schedule and manage tests for a course or batch."
-        actions={
-          <Button size="sm">
-            <Plus className="h-4 w-4" /> Create Test
-          </Button>
-        }
-      />
-      <TestsGrid tests={testCards} />
+      <PageHeader title="Tests" description="Create, publish and manage class tests across all batches." />
+      {loadError || !data ? (
+        <ErrorState title="We couldn't load tests" description={loadError ?? "Please try again."} />
+      ) : (
+        <TestsGrid data={data} basePath="/admin/tests" />
+      )}
     </div>
   );
 }
