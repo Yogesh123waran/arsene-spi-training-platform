@@ -604,6 +604,105 @@ export type TestQuestionOptionsInsert = {
 
 export type TestQuestionOptionsUpdate = Partial<TestQuestionOptionsInsert>;
 
+// -------------------------------------------------------------------
+// Test attempts (0009_test_attempts.sql) — staff read-only
+// -------------------------------------------------------------------
+
+/** Mirrors the public.test_attempt_status / test_attempt_finalize_reason enums. */
+export type TestAttemptStatusColumn = "in_progress" | "submitted" | "finalized";
+export type TestAttemptFinalizeReasonColumn =
+  | "student_submit"
+  | "deadline"
+  | "test_closed"
+  | "class_cancelled"
+  | "batch_cancelled"
+  | "withdrawn"
+  | "enrollment_ended";
+
+/** Mirrors the public.test_security_event_type enum. */
+export type TestSecurityEventTypeColumn =
+  | "attempt_started"
+  | "repeated_start"
+  | "blocked_start"
+  | "answer_saved"
+  | "blocked_answer_save"
+  | "submit"
+  | "auto_submit"
+  | "blocked_submission"
+  | "deadline_reached"
+  | "test_closed_finalization"
+  | "cancellation_finalization"
+  | "withdrawal_finalization"
+  | "invalid_attempt_access"
+  | "suspicious_repeated_access";
+
+/**
+ * public.test_attempts. SELECT only, for super admins and the batch's
+ * CURRENT trainer (RLS); students have no table access (they use the
+ * 0009 functions). Result columns are written once by the database at
+ * finalization — no client can insert or update, so the Insert/Update
+ * shapes are deliberately empty.
+ */
+export type TestAttemptsRow = {
+  id: string;
+  test_id: string;
+  batch_id: string;
+  student_id: string;
+  attempt_number: number;
+  status: TestAttemptStatusColumn;
+  started_at: string;
+  deadline_at: string;
+  question_count: number;
+  max_score: number;
+  finalized_at: string | null;
+  finalize_reason: TestAttemptFinalizeReasonColumn | null;
+  score: number | null;
+  percentage: number | null;
+  passed: boolean | null;
+  graded_at: string | null;
+};
+
+/** public.test_attempt_answers — graded fields are filled at finalization. Staff SELECT only. */
+export type TestAttemptAnswersRow = {
+  attempt_id: string;
+  test_question_id: string;
+  client_seq: number;
+  save_count: number;
+  saved_at: string | null;
+  is_correct: boolean | null;
+  marks_awarded: number | null;
+};
+
+/** public.test_security_events — append-only, server-written. Staff SELECT only. */
+export type TestSecurityEventsRow = {
+  id: number;
+  occurred_at: string;
+  event_type: TestSecurityEventTypeColumn;
+  actor_id: string;
+  attempt_id: string | null;
+  test_id: string | null;
+  batch_id: string | null;
+  student_id: string | null;
+  detail: Json;
+};
+
+/** public.test_best_results (security_invoker view): best finished attempt per test × student. */
+export type TestBestResultsRow = {
+  test_id: string;
+  batch_id: string;
+  student_id: string;
+  best_attempt_id: string;
+  score: number;
+  max_score: number;
+  percentage: number;
+  passed: boolean;
+  finalized_at: string;
+  finished_attempts: number;
+};
+
+/** No client writes exist for 0009 tables (no INSERT/UPDATE privilege). */
+type NoClientWrites = { [_ in never]: never };
+
 export type Database = {
   public: {
     Tables: {
@@ -1005,9 +1104,52 @@ export type Database = {
           },
         ];
       };
+      test_attempts: {
+        Row: TestAttemptsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [
+          {
+            foreignKeyName: "test_attempts_test_batch_fk";
+            columns: ["test_id", "batch_id"];
+            isOneToOne: false;
+            referencedRelation: "tests";
+            referencedColumns: ["id", "batch_id"];
+          },
+          {
+            foreignKeyName: "test_attempts_enrolment_fk";
+            columns: ["batch_id", "student_id"];
+            isOneToOne: false;
+            referencedRelation: "batch_students";
+            referencedColumns: ["batch_id", "student_id"];
+          },
+          {
+            foreignKeyName: "test_attempts_student_fk";
+            columns: ["student_id"];
+            isOneToOne: false;
+            referencedRelation: "students";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      test_attempt_answers: {
+        Row: TestAttemptAnswersRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
+      test_security_events: {
+        Row: TestSecurityEventsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
     };
     Views: {
-      [_ in never]: never;
+      test_best_results: {
+        Row: TestBestResultsRow;
+        Relationships: [];
+      };
     };
     Functions: {
       /**
@@ -1136,15 +1278,9 @@ export type Database = {
       question_status: QuestionStatusColumn;
       test_type: TestTypeColumn;
       test_status: TestStatusColumn;
-      test_attempt_status: "in_progress" | "submitted" | "finalized";
-      test_attempt_finalize_reason:
-        | "student_submit"
-        | "deadline"
-        | "test_closed"
-        | "class_cancelled"
-        | "batch_cancelled"
-        | "withdrawn"
-        | "enrollment_ended";
+      test_attempt_status: TestAttemptStatusColumn;
+      test_attempt_finalize_reason: TestAttemptFinalizeReasonColumn;
+      test_security_event_type: TestSecurityEventTypeColumn;
     };
     CompositeTypes: {
       [_ in never]: never;

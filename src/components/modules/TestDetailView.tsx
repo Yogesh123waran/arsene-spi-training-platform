@@ -22,14 +22,18 @@ import {
 } from "@/services/tests.actions";
 import { formatDate, formatDateTime } from "@/utils/format";
 import { TEST_TYPE_LABEL, type TestDetail } from "@/types/test";
+import type { StaffTestResultsState } from "@/types/test-result";
 import { TestEditor } from "./TestEditor";
 import { TestQuestionPicker } from "./TestQuestionPicker";
 import { QUESTION_TYPE_LABEL } from "./QuestionEditor";
+import { TestResultsPanel } from "./TestResultsPanel";
 
 export interface TestDetailViewProps {
   test: TestDetail;
   /** Route prefix, e.g. "/admin/tests". */
   basePath: string;
+  /** Staff results for this test (loaded server-side under RLS). */
+  results: StaffTestResultsState;
 }
 
 function Setting({ label, value }: { label: string; value: string }) {
@@ -43,10 +47,11 @@ function Setting({ label, value }: { label: string; value: string }) {
 
 /**
  * Staff test page: settings, lifecycle actions (only the ones valid for
- * the stored status), and the frozen question set with its answer key.
+ * the stored status), the frozen question set with its answer key, and
+ * the results of the test's attempts.
  * Admin/Trainer only — the lifecycle itself is enforced by the database.
  */
-export function TestDetailView({ test: t, basePath }: TestDetailViewProps) {
+export function TestDetailView({ test: t, basePath, results }: TestDetailViewProps) {
   const router = useRouter();
   const { showToast } = useToast();
   const [isPending, startTransition] = useTransition();
@@ -252,6 +257,8 @@ export function TestDetailView({ test: t, basePath }: TestDetailViewProps) {
           </CardContent>
         </Card>
       </div>
+
+      <TestResultsPanel testId={t.id} state={results} />
 
       {editing && <TestEditor classes={[]} test={t} onClose={() => setEditing(false)} />}
       {picking && <TestQuestionPicker testId={t.id} candidates={t.candidates} onClose={() => setPicking(false)} />}
