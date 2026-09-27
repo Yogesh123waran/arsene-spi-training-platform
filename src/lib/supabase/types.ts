@@ -1088,6 +1088,39 @@ export type Database = {
         Args: { p_test_question_id: string };
         Returns: undefined;
       };
+      /**
+       * Secure student test engine (0009/0010). Every student operation
+       * goes through these functions (identity from auth.uid(); blocked
+       * cases return {ok:false, reason}); students have no table access.
+       */
+      student_available_tests: {
+        Args: Record<string, never>;
+        Returns: Json;
+      };
+      start_test_attempt: {
+        Args: { p_test_id: string };
+        Returns: Json;
+      };
+      get_attempt_paper: {
+        Args: { p_attempt_id: string };
+        Returns: Json;
+      };
+      save_test_answer: {
+        Args: { p_attempt_id: string; p_test_question_id: string; p_option_ids: string[]; p_client_seq: number };
+        Returns: Json;
+      };
+      submit_test_attempt: {
+        Args: { p_attempt_id: string };
+        Returns: Json;
+      };
+      get_attempt_result: {
+        Args: { p_attempt_id: string };
+        Returns: Json;
+      };
+      staff_finalize_due_attempts: {
+        Args: { p_test_id: string };
+        Returns: Json;
+      };
     };
     Enums: {
       app_role: AppRoleColumn;
@@ -1103,6 +1136,15 @@ export type Database = {
       question_status: QuestionStatusColumn;
       test_type: TestTypeColumn;
       test_status: TestStatusColumn;
+      test_attempt_status: "in_progress" | "submitted" | "finalized";
+      test_attempt_finalize_reason:
+        | "student_submit"
+        | "deadline"
+        | "test_closed"
+        | "class_cancelled"
+        | "batch_cancelled"
+        | "withdrawn"
+        | "enrollment_ended";
     };
     CompositeTypes: {
       [_ in never]: never;
