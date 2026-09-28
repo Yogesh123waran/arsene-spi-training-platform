@@ -61,6 +61,7 @@ export const PERMISSIONS_BY_ROLE: Record<UserRole, Permission[]> = {
     "reports:generate",
     "certificates:manage",
     "notifications:manage",
+    "notifications:view",
     "settings:manage",
     "profile:update",
   ],
@@ -76,6 +77,7 @@ export const PERMISSIONS_BY_ROLE: Record<UserRole, Permission[]> = {
     "results:view",
     "performance:view",
     "reports:generate:assigned",
+    "notifications:view",
     "profile:update",
   ],
   student: [

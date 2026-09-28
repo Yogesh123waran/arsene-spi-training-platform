@@ -1,22 +1,19 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { Menu, Search, Bell, LogOut, ChevronDown, User, Settings as SettingsIcon } from "lucide-react";
+import { Menu, Search, LogOut, ChevronDown, User, Settings as SettingsIcon } from "lucide-react";
 import { navigationByRole, type PortalRole } from "@/config/navigation";
 import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { ROLE_LABEL } from "@/lib/auth/roles";
 import { Logo } from "./Logo";
 import { Avatar } from "@/components/ui/Avatar";
+import { NotificationBell } from "./NotificationBell";
 
 export interface TopbarProps {
   role: PortalRole;
   onOpenMobileMenu: () => void;
 }
-
-// PART 3 placeholder — replace with the real unread count once the
-// notifications module is wired to a data source.
-const MOCK_UNREAD_COUNT = 3;
 
 function useCurrentPageTitle(role: PortalRole) {
   const pathname = usePathname();
@@ -60,17 +57,7 @@ export function Topbar({ role, onOpenMobileMenu }: TopbarProps) {
           />
         </div>
 
-        <button
-          aria-label={`Notifications${MOCK_UNREAD_COUNT > 0 ? ` (${MOCK_UNREAD_COUNT} unread)` : ""}`}
-          className="relative rounded-lg p-2.5 text-ink-muted hover:bg-surface-sunken"
-        >
-          <Bell className="h-4 w-4" />
-          {MOCK_UNREAD_COUNT > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-signal-red px-1 font-mono text-[10px] font-semibold leading-none text-white">
-              {MOCK_UNREAD_COUNT}
-            </span>
-          )}
-        </button>
+        <NotificationBell role={role} />
 
         <Dropdown
           trigger={

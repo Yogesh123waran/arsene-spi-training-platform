@@ -803,6 +803,43 @@ export type CompletionEventsRow = {
   detail: Json;
 };
 
+// -------------------------------------------------------------------
+// In-app notifications (0012_notifications.sql)
+// Read and marked read ONLY through the four 0012 user functions
+// (identity from auth.uid(); no recipient argument). Rows are created
+// by database triggers, never by the application.
+// -------------------------------------------------------------------
+
+/** Mirrors the public.notification_type / notification_entity enums. */
+export type NotificationTypeColumn =
+  | "class_scheduled"
+  | "class_updated"
+  | "class_cancelled"
+  | "assignment_published"
+  | "submission_received"
+  | "submission_updated"
+  | "submission_returned"
+  | "test_published"
+  | "test_closed"
+  | "completion_recommended"
+  | "completion_approved"
+  | "completion_rejected"
+  | "certificate_issued"
+  | "certificate_revoked";
+export type NotificationEntityColumn = "class" | "assignment" | "submission" | "test" | "completion" | "certificate";
+
+/** One row returned by public.my_notifications(p_limit). */
+export type MyNotificationsRow = {
+  id: string;
+  type: NotificationTypeColumn;
+  title: string;
+  body: string;
+  link: string | null;
+  related_entity_type: NotificationEntityColumn | null;
+  created_at: string;
+  read_at: string | null;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -1451,6 +1488,26 @@ export type Database = {
         Args: { p_number: string; p_code: string };
         Returns: Json;
       };
+      // --- 0012 in-app notifications (the caller's own rows only) ---
+      /** Latest notifications of the signed-in user, newest first (the database caps it at 50). */
+      my_notifications: {
+        Args: { p_limit?: number };
+        Returns: MyNotificationsRow[];
+      };
+      my_unread_notification_count: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      /** false for another user's id, an unknown id or an already-read notification. */
+      mark_notification_read: {
+        Args: { p_notification_id: string };
+        Returns: boolean;
+      };
+      /** Number of the caller's notifications that were marked read. */
+      mark_all_notifications_read: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
     };
     Enums: {
       app_role: AppRoleColumn;
@@ -1472,6 +1529,8 @@ export type Database = {
       completion_status: CompletionStatusColumn;
       certificate_status: CertificateStatusColumn;
       completion_event_type: CompletionEventTypeColumn;
+      notification_type: NotificationTypeColumn;
+      notification_entity: NotificationEntityColumn;
     };
     CompositeTypes: {
       [_ in never]: never;
