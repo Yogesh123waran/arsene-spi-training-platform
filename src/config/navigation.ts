@@ -57,6 +57,7 @@ export const navigationByRole: Record<PortalRole, NavItem[]> = {
     { label: "Question Bank", href: "/trainer/questions", icon: HelpCircle },
     { label: "Performance", href: "/trainer/performance", icon: LineChart },
     { label: "Reports", href: "/trainer/reports", icon: FileBarChart },
+    { label: "Certificates", href: "/trainer/certificates", icon: Award },
   ],
   student: [
     { label: "Dashboard", href: "/student", icon: LayoutDashboard },

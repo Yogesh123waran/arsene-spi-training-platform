@@ -25,5 +25,8 @@ export * from "./results.service";
 // Note: results.actions.ts ("use server") is imported directly by the
 // client component that calls it, not re-exported here.
 export * from "./performance.service";
+export * from "./certificates.service";
+// Note: certificates.actions.ts ("use server") is imported directly by
+// the client components that call it, not re-exported here.
 // Note: classes.actions.ts ("use server") is imported directly by the
 // client components that call it, not re-exported here.

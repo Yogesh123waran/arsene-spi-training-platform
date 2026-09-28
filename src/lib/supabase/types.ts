@@ -703,6 +703,106 @@ export type TestBestResultsRow = {
 /** No client writes exist for 0009 tables (no INSERT/UPDATE privilege). */
 type NoClientWrites = { [_ in never]: never };
 
+// -------------------------------------------------------------------
+// Completion management and certificates (0011_certificates_completion.sql)
+// Staff SELECT only (RLS: super admin, or the batch's assigned trainer).
+// Every write goes through the 0011 database functions; students and
+// anonymous users read only through functions.
+// -------------------------------------------------------------------
+
+/** Mirrors the public.completion_status / certificate_status / completion_event_type enums. */
+export type CompletionStatusColumn = "recommended" | "approved" | "rejected" | "withdrawn";
+export type CertificateStatusColumn = "issued" | "revoked";
+export type CompletionEventTypeColumn =
+  | "final_assessment_set"
+  | "final_assessment_cleared"
+  | "required_assignment_added"
+  | "required_assignment_removed"
+  | "recommended"
+  | "recommendation_withdrawn"
+  | "approved"
+  | "rejected"
+  | "certificate_issued"
+  | "certificate_revoked";
+
+/** public.batch_final_assessments — the one required final assessment of a batch. */
+export type BatchFinalAssessmentsRow = {
+  batch_id: string;
+  test_id: string;
+  designated_by: string;
+  designated_at: string;
+};
+
+/** public.batch_required_assignments — required assignments of a batch. */
+export type BatchRequiredAssignmentsRow = {
+  batch_id: string;
+  assignment_id: string;
+  added_by: string;
+  added_at: string;
+};
+
+/** public.completion_records — one completion decision per student per batch. */
+export type CompletionRecordsRow = {
+  id: string;
+  batch_id: string;
+  student_id: string;
+  status: CompletionStatusColumn;
+  recommended_by: string;
+  recommended_at: string;
+  recommendation_note: string | null;
+  eligibility_at_recommendation: Json;
+  decided_by: string | null;
+  decided_at: string | null;
+  decision_note: string | null;
+  eligibility_at_decision: Json | null;
+  completion_date: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/** public.certificates — an immutable issued snapshot (revocable once). */
+export type CertificatesRow = {
+  id: string;
+  certificate_number: string;
+  verification_code: string;
+  completion_id: string;
+  batch_id: string;
+  student_id: string;
+  status: CertificateStatusColumn;
+  replaces_certificate_id: string | null;
+  student_name: string;
+  course_code: string;
+  course_title: string;
+  batch_code: string;
+  batch_name: string;
+  batch_start_date: string;
+  batch_end_date: string;
+  completion_date: string;
+  trainer_name: string | null;
+  issuer_name: string;
+  template_version: string;
+  signatories: Json;
+  snapshot_sha256: string;
+  issued_by: string;
+  issued_at: string;
+  revoked_by: string | null;
+  revoked_at: string | null;
+  revocation_reason: string | null;
+};
+
+/** public.completion_events — append-only audit log. */
+export type CompletionEventsRow = {
+  id: number;
+  occurred_at: string;
+  event_type: CompletionEventTypeColumn;
+  actor_id: string;
+  batch_id: string;
+  student_id: string | null;
+  completion_id: string | null;
+  certificate_id: string | null;
+  detail: Json;
+};
+
 export type Database = {
   public: {
     Tables: {
@@ -1144,6 +1244,36 @@ export type Database = {
         Update: NoClientWrites;
         Relationships: [];
       };
+      batch_final_assessments: {
+        Row: BatchFinalAssessmentsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
+      batch_required_assignments: {
+        Row: BatchRequiredAssignmentsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
+      completion_records: {
+        Row: CompletionRecordsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
+      certificates: {
+        Row: CertificatesRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
+      completion_events: {
+        Row: CompletionEventsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
     };
     Views: {
       test_best_results: {
@@ -1263,6 +1393,64 @@ export type Database = {
         Args: { p_test_id: string };
         Returns: Json;
       };
+      /**
+       * Completion management and certificates (0011). Identity from
+       * auth.uid(); business outcomes return {ok:false, reason}. The
+       * database generates numbers, codes, snapshots and all stamps.
+       */
+      set_final_assessment: {
+        Args: { p_batch_id: string; p_test_id: string };
+        Returns: Json;
+      };
+      clear_final_assessment: {
+        Args: { p_batch_id: string };
+        Returns: Json;
+      };
+      add_required_assignment: {
+        Args: { p_batch_id: string; p_assignment_id: string };
+        Returns: Json;
+      };
+      remove_required_assignment: {
+        Args: { p_batch_id: string; p_assignment_id: string };
+        Returns: Json;
+      };
+      recommend_completion: {
+        Args: { p_batch_id: string; p_student_id: string; p_note?: string | null };
+        Returns: Json;
+      };
+      withdraw_recommendation: {
+        Args: { p_completion_id: string };
+        Returns: Json;
+      };
+      decide_completion: {
+        Args: { p_completion_id: string; p_approve: boolean; p_note?: string | null };
+        Returns: Json;
+      };
+      issue_certificate: {
+        Args: { p_completion_id: string };
+        Returns: Json;
+      };
+      revoke_certificate: {
+        Args: { p_certificate_id: string; p_reason: string };
+        Returns: Json;
+      };
+      staff_batch_completion: {
+        Args: { p_batch_id: string };
+        Returns: Json;
+      };
+      student_completion_status: {
+        Args: Record<string, never>;
+        Returns: Json;
+      };
+      student_certificates: {
+        Args: Record<string, never>;
+        Returns: Json;
+      };
+      /** Public (anon): BOTH the number and the verification code must match. */
+      verify_certificate: {
+        Args: { p_number: string; p_code: string };
+        Returns: Json;
+      };
     };
     Enums: {
       app_role: AppRoleColumn;
@@ -1281,6 +1469,9 @@ export type Database = {
       test_attempt_status: TestAttemptStatusColumn;
       test_attempt_finalize_reason: TestAttemptFinalizeReasonColumn;
       test_security_event_type: TestSecurityEventTypeColumn;
+      completion_status: CompletionStatusColumn;
+      certificate_status: CertificateStatusColumn;
+      completion_event_type: CompletionEventTypeColumn;
     };
     CompositeTypes: {
       [_ in never]: never;
