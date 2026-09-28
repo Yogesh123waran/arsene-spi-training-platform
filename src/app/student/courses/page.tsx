@@ -1,6 +1,6 @@
 import { PageHeader } from "@/components/layout/PageHeader";
 import { ErrorState } from "@/components/ui/ErrorState";
-import { CoursesGrid } from "@/components/modules/CoursesGrid";
+import { StudentCoursesGrid } from "@/components/modules/StudentCoursesGrid";
 import { coursesService } from "@/services/courses.service";
 import type { CourseSummary } from "@/types/course";
 
@@ -24,7 +24,7 @@ export default async function StudentCoursesPage() {
       {loadError ? (
         <ErrorState title="We couldn't load your courses" description={loadError} />
       ) : (
-        <CoursesGrid courses={courses} basePath="/student/courses" />
+        <StudentCoursesGrid courses={courses} basePath="/student/courses" />
       )}
     </div>
   );
