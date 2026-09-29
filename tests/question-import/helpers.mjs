@@ -5,6 +5,12 @@ import { fileURLToPath } from "node:url";
 
 if (!process.env.QUESTION_IMPORT_CORE) throw new Error("Run through tests/question-import/run.mjs");
 export const core = await import(process.env.QUESTION_IMPORT_CORE);
+/** Modules kept out of the core barrel (they import exceljs/papaparse; the app loads them on demand). */
+export const load = (name) => import(`${process.env.QUESTION_IMPORT_BUILD}/${name}.mjs`);
+export const ExcelJS = (await import(process.env.QUESTION_IMPORT_EXCELJS)).default;
+export const fixture = (name) => fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "fixtures", name));
+/** A Node Buffer's bytes as a standalone ArrayBuffer (what File.arrayBuffer() gives in the browser). */
+export const arrayBufferOf = (buf) => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 /** Expected values computed by the real 0013 SQL functions on PostgreSQL. */

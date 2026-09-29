@@ -16,6 +16,7 @@ import type {
   QuestionImportItemsRow,
   QuestionImportRunsRow,
   QuestionStatusColumn,
+  QuestionTypeColumn,
 } from "@/lib/supabase/types";
 import { readAllByKeyset } from "@/lib/supabase/paging";
 import type { ImportChunkItem, ImportPlan, ImportRejectReason } from "@/types/question-import";
@@ -115,6 +116,24 @@ export interface UpdateTargetRecord {
 
 export type RunItemRecord = Pick<QuestionImportItemsRow, "row_number" | "action" | "question_id">;
 
+export interface ExportQuestionRecord {
+  id: string;
+  course_id: string;
+  module_id: string | null;
+  question_text: string;
+  question_type: QuestionTypeColumn;
+  marks: number;
+  explanation: string | null;
+  status: QuestionStatusColumn;
+  revision: number;
+  updated_at: string;
+  options: { option_text: string; display_order: number; is_correct: boolean }[];
+}
+
+const OPTIONS_PER_QUESTION_MAX = 10;
+/** Options of this many questions fit in one response (≤ 1000 rows). */
+const EXPORT_OPTION_BATCH = Math.floor(900 / OPTIONS_PER_QUESTION_MAX);
+
 const FINGERPRINT_COURSES_PER_CALL = 50; // 0013 limit
 const IN_CHUNK = 100; // keep `.in(...)` URLs short
 const RUN_SELECT =
@@ -165,6 +184,53 @@ export function createQuestionImportRepository(getClient: () => Promise<Client |
         out.push(...(data ?? []));
       }
       return out;
+    },
+
+    /**
+     * Questions with their options for an export, read under the caller's
+     * RLS (super admin: all; trainer: current courses). courseIds limits to
+     * those courses (null = everything visible); draftOnly for update files.
+     * Every page is read.
+     */
+    async listQuestionsForExport(courseIds: string[] | null, draftOnly: boolean): Promise<ExportQuestionRecord[]> {
+      const supabase = await client();
+      const groups = courseIds === null ? [null] : split(Array.from(new Set(courseIds)), IN_CHUNK);
+      const questions: Omit<ExportQuestionRecord, "options">[] = [];
+      for (const group of groups) {
+        if (group && group.length === 0) continue;
+        const rows = await readAllByKeyset(async (afterId, limit) => {
+          const data = await call("listQuestionsForExport", () => {
+            let query = supabase
+              .from("questions")
+              .select("id, course_id, module_id, question_text, question_type, marks, explanation, status, revision, updated_at")
+              .order("id", { ascending: true })
+              .limit(limit);
+            if (group) query = query.in("course_id", group);
+            if (draftOnly) query = query.eq("status", "draft");
+            if (afterId) query = query.gt("id", afterId);
+            return query;
+          });
+          return { data: data ?? [], error: null };
+        });
+        questions.push(...rows);
+      }
+
+      const optionsById = new Map<string, ExportQuestionRecord["options"]>();
+      for (const ids of split(questions.map((q) => q.id), EXPORT_OPTION_BATCH)) {
+        const data = await call("listQuestionsForExport.options", () =>
+          supabase.from("question_options").select("question_id, option_text, display_order, is_correct").in("question_id", ids)
+        );
+        for (const o of data ?? []) {
+          const list = optionsById.get(o.question_id) ?? [];
+          list.push({ option_text: o.option_text, display_order: o.display_order, is_correct: o.is_correct });
+          optionsById.set(o.question_id, list);
+        }
+      }
+      return questions.map((q) => ({
+        ...q,
+        marks: Number(q.marks),
+        options: (optionsById.get(q.id) ?? []).sort((a, b) => a.display_order - b.display_order),
+      }));
     },
 
     /** start_question_import → the new run id. */

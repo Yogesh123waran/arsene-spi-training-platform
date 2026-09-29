@@ -17,7 +17,7 @@ export const questionImportService = createQuestionImportService({
   isDemoMode: () => authConfig.mode === "demo",
   listManageableCourses: async (user) =>
     (await questionsRepository.listManageableCourses(user.role === "admin" ? { kind: "all" } : { kind: "trainer", trainerId: user.id })).map(
-      (c) => ({ id: c.id, code: c.course_code, modules: c.modules.map((m) => ({ id: m.id, code: m.module_code })) })
+      (c) => ({ id: c.id, code: c.course_code, title: c.title, modules: c.modules.map((m) => ({ id: m.id, code: m.module_code, title: m.title })) })
     ),
 });
 

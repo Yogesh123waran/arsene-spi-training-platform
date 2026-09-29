@@ -313,6 +313,34 @@ test("uncertain text-PDF item (flagged by the extractor) → NEEDS_REVIEW", asyn
 });
 
 // ---------------------------------------------------------------------------
+// Excel/CSV: the chosen course fills only rows without a Course Code
+// ---------------------------------------------------------------------------
+test("xlsx/csv: rows with a Course Code keep it; rows without use the chosen course and module", async () => {
+  for (const source of ["xlsx", "csv"]) {
+    const ctx = context({ source, defaultCourseId: C1, defaultModuleId: M1 });
+    const [withCode, blank] = await run([row(2, { courseCode: "SPI-201" }), row(3, { courseCode: "" })], ctx);
+    assert.equal(withCode.status, "CREATE", `${source}: a different code is not a mismatch for structured files`);
+    assert.equal(withCode.question.courseId, C2);
+    assert.equal(withCode.question.moduleId, null, "default module only for rows that used the chosen course");
+    assert.equal(blank.question.courseId, C1);
+    assert.equal(blank.question.moduleId, M1);
+  }
+});
+test("xlsx/csv: no chosen course and no Course Code → course_missing (never guessed)", () => {
+  assert.deepEqual(codes(validateRow(row(2, { courseCode: "" }), context({ source: "csv" }))), ["course_missing"]);
+});
+test("parser-reported row issues (e.g. formula cell) are always part of the result", () => {
+  const r = validateRow(row(2, { sourceIssues: [{ code: "formula_cell", severity: "error", field: "marks", message: "Marks: formula" }] }), context());
+  assert.equal(r.status, "ERROR");
+  assert.deepEqual(codes(r), ["formula_cell"]);
+});
+test("update row with no course code uses the question's own course even when a course is chosen", () => {
+  const r = validateRow(row(2, { questionId: Q_OTHER_COURSE, courseCode: "" }), context({ source: "xlsx", defaultCourseId: C1 }));
+  assert.equal(r.status, "UPDATE");
+  assert.equal(r.question.courseId, C2);
+});
+
+// ---------------------------------------------------------------------------
 // Plan: summary, chunk items, chunks, limits
 // ---------------------------------------------------------------------------
 test("summary counts every status", async () => {

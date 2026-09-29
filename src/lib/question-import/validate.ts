@@ -66,7 +66,7 @@ function findCourse(courses: ImportCourse[], id: string | null | undefined): Imp
 /** Validate one row's content (no duplicate check). */
 export function validateRow(raw: RawImportRow, context: ImportContext): ImportRowResult {
   const extracted = EXTRACTED.has(context.source);
-  const issues: ImportIssue[] = [];
+  const issues: ImportIssue[] = [...(raw.sourceIssues ?? [])];
 
   if (!Number.isInteger(raw.rowNumber) || raw.rowNumber < 1 || raw.rowNumber > IMPORT_ROW_NUMBER_MAX) {
     issues.push(err("row_number_invalid", "row", `Row numbers must be whole numbers from 1 to ${IMPORT_ROW_NUMBER_MAX}.`));
@@ -96,18 +96,22 @@ export function validateRow(raw: RawImportRow, context: ImportContext): ImportRo
   const action: "create" | "update" = questionId ? "update" : "create";
 
   // Course: the row's code, else the course chosen in the UI, else (updates) the question's own course.
+  // Word/PDF: the chosen course is the import's course — a different code in the document is an error.
+  // Excel/CSV: the chosen course only fills rows that have no Course Code.
   const codeText = cleanText(raw.courseCode);
   let course: ImportCourse | undefined;
+  let usedDefaultCourse = false;
   if (codeText) {
     course = context.courses.find((c) => normalizeCode(c.code) === normalizeCode(codeText));
     if (!course) {
       issues.push(err("course_not_found", "courseCode", `Course code "${codeText}" was not found, or it isn't a course you can manage.`));
-    } else if (context.defaultCourseId && course.id.toLowerCase() !== context.defaultCourseId.toLowerCase()) {
+    } else if (extracted && context.defaultCourseId && course.id.toLowerCase() !== context.defaultCourseId.toLowerCase()) {
       issues.push(err("course_mismatch", "courseCode", `Course code "${codeText}" does not match the course chosen for this import.`));
       course = undefined; // don't validate the module against the wrong course
     }
-  } else if (context.defaultCourseId) {
+  } else if (context.defaultCourseId && !target) {
     course = findCourse(context.courses, context.defaultCourseId);
+    usedDefaultCourse = true;
     if (!course) issues.push(err("course_not_found", "courseCode", "The course chosen for this import isn't a course you can manage."));
   } else if (target) {
     course = findCourse(context.courses, target.courseId);
@@ -128,7 +132,7 @@ export function validateRow(raw: RawImportRow, context: ImportContext): ImportRo
       if (found) moduleId = found.id;
       else issues.push(err("module_not_found", "moduleCode", `Module code "${moduleText}" does not belong to course ${course.code}.`));
     }
-  } else if (context.defaultModuleId && course) {
+  } else if (context.defaultModuleId && course && (usedDefaultCourse || extracted)) {
     const found = course.modules.find((m) => m.id.toLowerCase() === context.defaultModuleId!.toLowerCase());
     if (found) moduleId = found.id;
     else issues.push(err("module_not_found", "moduleCode", "The module chosen for this import does not belong to the course."));

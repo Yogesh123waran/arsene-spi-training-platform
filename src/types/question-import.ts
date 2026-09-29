@@ -18,6 +18,15 @@ export const IMPORT_QUESTION_LIMITS: Record<ImportSource, number> = {
   pdf_ocr: 1000,
 };
 
+/** Largest accepted source file (checked before parsing). */
+export const IMPORT_FILE_SIZE_LIMITS: Record<ImportSource, number> = {
+  xlsx: 10 * 1024 * 1024,
+  csv: 10 * 1024 * 1024,
+  docx: 15 * 1024 * 1024,
+  pdf: 25 * 1024 * 1024,
+  pdf_ocr: 25 * 1024 * 1024,
+};
+
 /** Rows per import_question_chunk call (0013 maximum). */
 export const IMPORT_CHUNK_SIZE = 100;
 
@@ -81,7 +90,12 @@ export type ImportIssueCode =
   | "duplicate_in_bank"
   | "included_anyway"
   | "similar_question"
-  | "revision_conflict";
+  | "revision_conflict"
+  | "revision_missing"
+  | "revision_invalid"
+  | "formula_cell"
+  | "cell_error"
+  | "row_malformed";
 
 export interface ImportIssue {
   code: ImportIssueCode;
@@ -128,13 +142,61 @@ export interface RawImportRow {
    * that changed since then is a revision conflict (never overwritten).
    */
   expectedRevision?: number | null;
+  /** Problems the file parser found in this row (e.g. a formula cell); always reported. */
+  sourceIssues?: ImportIssue[];
+}
+
+/** A parsed Excel/CSV file (browser side; nothing is uploaded). */
+export interface ParsedImportFile {
+  source: ImportSource;
+  rows: RawImportRow[];
+  /** Blocking problems (bad headers, malformed file, too many rows): nothing can be imported. */
+  fileErrors: string[];
+  /** Non-blocking notes (ignored columns, skipped blank rows). */
+  warnings: string[];
+  blankRowsSkipped: number;
+  /** Worksheet read (Excel). */
+  sheetName?: string;
+  /** Whether the file has a Course Code column with a value on every row. */
+  everyRowHasCourse: boolean;
+}
+
+/** One Question Bank question as exported for staff (includes the answer key). */
+export interface ExportQuestion {
+  id: string;
+  courseCode: string;
+  moduleCode: string | null;
+  text: string;
+  type: QuestionType;
+  marks: number;
+  options: { text: string; isCorrect: boolean }[];
+  explanation: string | null;
+  status: QuestionStatus;
+  revision: number;
+}
+
+/** "bank": every question in scope; "update": draft questions only, ready to edit and re-import. */
+export type ExportMode = "bank" | "update";
+
+export interface QuestionExport {
+  mode: ExportMode;
+  generatedAt: string;
+  questions: ExportQuestion[];
+}
+
+/** A spreadsheet-shaped table (header row + data rows). */
+export interface SheetTable {
+  headers: string[];
+  rows: Array<Array<string | number>>;
 }
 
 /** A course the caller may manage (the import scope). */
 export interface ImportCourse {
   id: string;
   code: string;
-  modules: { id: string; code: string }[];
+  /** For the course picker (not used by validation). */
+  title?: string;
+  modules: { id: string; code: string; title?: string }[];
 }
 
 /** An existing bank question, as returned by question_import_fingerprints (0013). */

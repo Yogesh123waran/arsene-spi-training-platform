@@ -17,6 +17,9 @@ import {
   IMPORT_CHUNK_SIZE,
   IMPORT_QUESTION_LIMITS,
   type ExistingQuestionFingerprint,
+  type ExportMode,
+  type ExportQuestion,
+  type QuestionExport,
   type ImportChunkOutcome,
   type ImportChunkRequest,
   type ImportContext,
@@ -34,6 +37,7 @@ import {
 import type { QuestionImportRunsRow } from "@/lib/supabase/types";
 import { checkQuestionCount, toChunkItems, validateImport } from "@/lib/question-import/validate";
 import { cleanText, normalizeCode, parseUuid } from "@/lib/question-import/normalize";
+import { newestFirst } from "@/lib/supabase/paging";
 import { QuestionImportRepositoryError, RAW_POSTGRES_MESSAGE, type QuestionImportRepository } from "@/repositories/question-import.repository.core";
 
 export class QuestionImportAuthorizationError extends Error {
@@ -340,6 +344,45 @@ export function createQuestionImportService(deps: QuestionImportServiceDeps) {
       const run = await requireOwnRun(user, runId);
       const items = await repository.listRunItems(runId);
       return { run: toProgress(run), doneRowNumbers: items.map((i) => i.row_number) };
+    },
+
+    /**
+     * Question Bank export for the caller's own scope (staff only — the
+     * rows include the answer key, which super admins and course trainers
+     * can already see). "bank": every question in scope; "update": draft
+     * questions only, for editing and re-importing. Scope = the caller's
+     * manageable courses; RLS applies to every read as well.
+     */
+    async exportQuestions(mode: ExportMode): Promise<QuestionExport> {
+      const user = await requireImporter();
+      if (mode !== "bank" && mode !== "update") throw new QuestionImportValidationError("Choose what to export.");
+      const courses = await deps.listManageableCourses(user);
+      const generatedAt = new Date().toISOString();
+      if (courses.length === 0) return { mode, generatedAt, questions: [] };
+      const byId = new Map(courses.map((c) => [c.id.toLowerCase(), c]));
+      const courseIds = user.role === "admin" ? null : courses.map((c) => c.id);
+      const records = await repository.listQuestionsForExport(courseIds, mode === "update");
+      const questions: (ExportQuestion & { updated_at: string })[] = [];
+      for (const r of records) {
+        const course = byId.get(r.course_id.toLowerCase());
+        if (!course) continue; // outside the caller's scope
+        const courseModule = r.module_id ? course.modules.find((m) => m.id.toLowerCase() === r.module_id!.toLowerCase()) : undefined;
+        questions.push({
+          id: r.id,
+          courseCode: course.code,
+          moduleCode: courseModule?.code ?? null,
+          text: r.question_text,
+          type: r.question_type,
+          marks: Number(r.marks),
+          options: r.options.map((o) => ({ text: o.option_text, isCorrect: o.is_correct })),
+          explanation: r.explanation,
+          status: r.status,
+          revision: r.revision,
+          updated_at: r.updated_at,
+        });
+      }
+      questions.sort((a, b) => (a.courseCode < b.courseCode ? -1 : a.courseCode > b.courseCode ? 1 : newestFirst(a, b)));
+      return { mode, generatedAt, questions: questions.map(({ updated_at: _u, ...q }) => q) };
     },
 
     /** The caller's in-progress run (to resume or discard after an interruption), or null. */

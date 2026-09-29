@@ -18,6 +18,8 @@ import {
   QuestionImportValidationError,
 } from "./question-import.service";
 import type {
+  ExportMode,
+  QuestionExport,
   ImportActionResult,
   ImportChunkOutcome,
   ImportChunkRequest,
@@ -75,4 +77,9 @@ export async function getQuestionImportResumeStateAction(runId: string): Promise
 
 export async function getActiveQuestionImportAction(): Promise<ImportActionResult<ImportRunProgress | null>> {
   return run("getActiveRun", () => questionImportService.getActiveRun());
+}
+
+/** Staff-only Question Bank export data for the caller's scope; the browser builds the XLSX/CSV file. */
+export async function exportQuestionBankAction(mode: ExportMode): Promise<ImportActionResult<QuestionExport>> {
+  return run("exportQuestions", () => questionImportService.exportQuestions(mode));
 }

@@ -18,6 +18,7 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { Dialog } from "@/components/ui/Dialog";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { QuestionBankTransferMenu } from "./QuestionBankTransferMenu";
 import { useToast } from "@/components/ui/Toast";
 import {
   activateQuestion,
@@ -123,7 +124,8 @@ export function QuestionsView({ data }: QuestionsViewProps) {
             ]}
           />
         </div>
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <QuestionBankTransferMenu />
           <Button size="sm" onClick={() => setEditor({ mode: "create" })} disabled={!canCreate || isPending}>
             <Plus className="h-4 w-4" /> Add question
           </Button>
