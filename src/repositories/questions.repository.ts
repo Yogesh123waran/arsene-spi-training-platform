@@ -1,5 +1,6 @@
 import "server-only";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { newestFirst, readAllByKeyset } from "@/lib/supabase/paging";
 import type {
   Json,
   QuestionOptionsRow,
@@ -123,16 +124,22 @@ const QUESTION_SELECT =
   "id, course_id, module_id, question_text, question_type, marks, status, explanation, revision, updated_at, question_options ( option_text, display_order, is_correct )";
 
 export const questionsRepository = {
-  /** Questions the caller may see (RLS), newest change first. courseIds limits to those courses. */
+  /**
+   * Questions the caller may see (RLS), newest change first. courseIds
+   * limits to those courses. Reads every page (keyset on id), so banks
+   * larger than one response are never silently truncated.
+   */
   listQuestions(courseIds: string[] | null): Promise<QuestionRecord[]> {
     if (courseIds && courseIds.length === 0) return Promise.resolve([]);
     return run("listQuestions", async () => {
       const supabase = await client();
-      let query = supabase.from("questions").select(QUESTION_SELECT).order("updated_at", { ascending: false });
-      if (courseIds) query = query.in("course_id", courseIds);
-      const { data, error } = await query;
-      if (error) throw error;
-      return data ?? [];
+      const rows = await readAllByKeyset((afterId, limit) => {
+        let query = supabase.from("questions").select(QUESTION_SELECT).order("id", { ascending: true }).limit(limit);
+        if (courseIds) query = query.in("course_id", courseIds);
+        if (afterId) query = query.gt("id", afterId);
+        return query;
+      });
+      return rows.sort(newestFirst);
     });
   },
 

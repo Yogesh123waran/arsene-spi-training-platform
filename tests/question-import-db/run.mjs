@@ -1,0 +1,106 @@
+// Bulk Question Import — repository/service integration tests against a
+// throwaway local PostgreSQL with migrations 0001–0013 (never Supabase).
+//   PG_BIN="C:\Program Files\PostgreSQL\18\bin" node tests/question-import-db/run.mjs
+// Creates a temporary cluster, applies the Supabase role/auth stand-in
+// (fixtures/bootstrap.sql), every migration, and the seed; transpiles the
+// real repository/service code with the project's `typescript`; runs the
+// tests; always deletes the cluster.
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import ts from "typescript";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const root = path.resolve(here, "../..");
+const pgBin = process.env.PG_BIN ?? (process.platform === "win32" ? "C:\\Program Files\\PostgreSQL\\18\\bin" : "/usr/lib/postgresql/18/bin");
+const exe = (name) => path.join(pgBin, process.platform === "win32" ? `${name}.exe` : name);
+if (!fs.existsSync(exe("psql"))) {
+  console.error(`PostgreSQL client tools not found in ${pgBin}. Set PG_BIN.`);
+  process.exit(2);
+}
+const port = Number(process.env.PG_TEST_PORT ?? 55449);
+const work = fs.mkdtempSync(path.join(os.tmpdir(), "question-import-db-"));
+const data = path.join(work, "data");
+const env = { ...process.env, PGCLIENTENCODING: "UTF8" };
+const sh = (cmd, args, opts = {}) => spawnSync(cmd, args, { encoding: "utf8", env, ...opts });
+const psql = (args) => sh(exe("psql"), ["-X", "-q", "-h", "localhost", "-p", String(port), "-U", "postgres", ...args]);
+
+let status = 1;
+let started = false;
+try {
+  // 1. Cluster + database
+  let r = sh(exe("initdb"), ["-D", data, "-U", "postgres", "-A", "trust", "-E", "UTF8", "--no-locale"]);
+  if (r.status !== 0) throw new Error(`initdb failed: ${r.stderr}`);
+  // No pipes: the server process would inherit them and spawnSync would never return.
+  r = sh(exe("pg_ctl"), ["-D", data, "-o", `-p ${port} -c listen_addresses=localhost`, "-l", path.join(work, "server.log"), "-w", "start"], { stdio: "ignore" });
+  if (r.status !== 0) throw new Error(`pg_ctl start failed (see ${path.join(work, "server.log")})`);
+  started = true;
+  r = psql(["-d", "postgres", "-c", "create database qi_test"]);
+  if (r.status !== 0) throw new Error(r.stderr);
+
+  // 2. Supabase stand-in, migrations 0001–0013, seed
+  const files = [
+    path.join(here, "fixtures/bootstrap.sql"),
+    ...fs.readdirSync(path.join(root, "supabase/migrations")).filter((f) => /^00(0\d|1[0-3])_.*\.sql$/.test(f)).sort().map((f) => path.join(root, "supabase/migrations", f)),
+    path.join(here, "fixtures/seed.sql"),
+  ];
+  for (const file of files) {
+    r = psql(["-d", "qi_test", "-v", "ON_ERROR_STOP=1", "-f", file]);
+    if (r.status !== 0) throw new Error(`${path.basename(file)} failed:\n${r.stderr}`);
+  }
+  console.log(`database ready: ${files.length - 2} migrations (0001–0013) + seed`);
+
+  // 3. Transpile the real modules under test
+  const out = path.join(work, "build");
+  const sources = [
+    "src/lib/supabase/paging.ts",
+    "src/lib/supabase/types.ts",
+    "src/types/question.ts",
+    "src/types/question-import.ts",
+    "src/types/auth.ts",
+    "src/types/user.ts",
+    ...fs.readdirSync(path.join(root, "src/lib/question-import")).filter((f) => f.endsWith(".ts")).map((f) => `src/lib/question-import/${f}`),
+    "src/repositories/question-import.repository.core.ts",
+    "src/services/question-import.service.core.ts",
+  ];
+  for (const rel of sources) {
+    const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {
+      compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022, verbatimModuleSyntax: false },
+    }).outputText;
+    const target = path.join(out, rel.replace(/^src\//, "").replace(/\.ts$/, ".mjs"));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(
+      target,
+      code.replace(/(from\s+["'])(@\/[^"']+|\.{1,2}\/[^"']+)(["'])/g, (_, a, spec, b) => {
+        const abs = spec.startsWith("@/") ? path.join(out, spec.slice(2)) : path.resolve(path.dirname(target), spec);
+        let rel2 = path.relative(path.dirname(target), abs + ".mjs").split(path.sep).join("/");
+        if (!rel2.startsWith(".")) rel2 = "./" + rel2;
+        return a + rel2 + b;
+      })
+    );
+  }
+
+  // 4. Tests
+  const tests = fs.readdirSync(here).filter((f) => f.endsWith(".test.mjs")).map((f) => path.join(here, f));
+  r = spawnSync(process.execPath, ["--test", "--test-concurrency=1", ...tests], {
+    stdio: "inherit",
+    env: {
+      ...env,
+      QI_BUILD: pathToFileURL(out).href,
+      QI_PSQL: exe("psql"),
+      QI_PORT: String(port),
+      QI_DB: "qi_test",
+    },
+  });
+  status = r.status ?? 1;
+} catch (error) {
+  console.error(error instanceof Error ? error.message : error);
+  status = 1;
+} finally {
+  if (started) sh(exe("pg_ctl"), ["-D", data, "-m", "fast", "-w", "stop"], { stdio: "ignore" });
+  fs.rmSync(work, { recursive: true, force: true });
+  console.log(`throwaway cluster ${fs.existsSync(work) ? "NOT removed" : "removed"}`);
+}
+process.exit(status);

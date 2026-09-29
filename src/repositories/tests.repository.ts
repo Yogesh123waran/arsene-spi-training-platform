@@ -1,5 +1,6 @@
 import "server-only";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { newestFirst, readAllByKeyset } from "@/lib/supabase/paging";
 import type {
   QuestionTypeColumn,
   TestQuestionOptionsRow,
@@ -127,6 +128,7 @@ export interface CandidateQuestionRecord {
   question_text: string;
   question_type: QuestionTypeColumn;
   marks: number;
+  updated_at: string;
   modules: { title: string } | null;
 }
 
@@ -240,18 +242,27 @@ export const testsRepository = {
     });
   },
 
-  /** Active bank questions of a course the caller may read (RLS: admin, or current course trainer). */
+  /**
+   * Active bank questions of a course the caller may read (RLS: admin, or
+   * current course trainer), newest change first. Reads every page (keyset
+   * on id), so courses with more than one response of questions are never
+   * silently truncated.
+   */
   listCandidateQuestions(courseId: string): Promise<CandidateQuestionRecord[]> {
     return run("listCandidateQuestions", async () => {
       const supabase = await client();
-      const { data, error } = await supabase
-        .from("questions")
-        .select("id, question_text, question_type, marks, modules ( title )")
-        .eq("course_id", courseId)
-        .eq("status", "active")
-        .order("updated_at", { ascending: false });
-      if (error) throw error;
-      return data ?? [];
+      const rows = await readAllByKeyset((afterId, limit) => {
+        let query = supabase
+          .from("questions")
+          .select("id, question_text, question_type, marks, updated_at, modules ( title )")
+          .eq("course_id", courseId)
+          .eq("status", "active")
+          .order("id", { ascending: true })
+          .limit(limit);
+        if (afterId) query = query.gt("id", afterId);
+        return query;
+      });
+      return rows.sort(newestFirst);
     });
   },
 

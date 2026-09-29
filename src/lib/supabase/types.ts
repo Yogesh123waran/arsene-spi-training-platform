@@ -828,6 +828,60 @@ export type NotificationTypeColumn =
   | "certificate_revoked";
 export type NotificationEntityColumn = "class" | "assignment" | "submission" | "test" | "completion" | "certificate";
 
+// -------------------------------------------------------------------
+// Bulk question import (0013_question_import.sql)
+// History: SELECT for its creator or a super admin; no client writes.
+// Every write goes through the 0013 functions (questions only through
+// save_question). question_fingerprint_cache has no client access.
+// -------------------------------------------------------------------
+
+/** Mirrors the public.question_import_source / _status / _action enums. */
+export type QuestionImportSourceColumn = "xlsx" | "csv" | "docx" | "pdf" | "pdf_ocr";
+export type QuestionImportStatusColumn = "in_progress" | "completed" | "discarded";
+export type QuestionImportActionColumn = "create" | "update";
+
+/** public.question_import_runs */
+export type QuestionImportRunsRow = {
+  id: string;
+  created_by: string;
+  source: QuestionImportSourceColumn;
+  file_name: string;
+  file_sha256: string;
+  planned_creates: number;
+  planned_updates: number;
+  planned_excluded: number;
+  status: QuestionImportStatusColumn;
+  created_count: number;
+  updated_count: number;
+  discarded_count: number;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  discarded_at: string | null;
+};
+
+/** public.question_import_items — one question written by an import. */
+export type QuestionImportItemsRow = {
+  run_id: string;
+  row_number: number;
+  action: QuestionImportActionColumn;
+  question_id: string;
+  previous_revision: number | null;
+  new_revision: number;
+  fingerprint: string;
+  created_at: string;
+};
+
+/** One row of public.question_import_fingerprints(p_course_ids). */
+export type QuestionImportFingerprintsRow = {
+  question_id: string;
+  course_id: string;
+  status: QuestionStatusColumn;
+  revision: number;
+  fingerprint: string;
+  text_fingerprint: string;
+};
+
 /** One row returned by public.my_notifications(p_limit). */
 export type MyNotificationsRow = {
   id: string;
@@ -1311,6 +1365,18 @@ export type Database = {
         Update: NoClientWrites;
         Relationships: [];
       };
+      question_import_runs: {
+        Row: QuestionImportRunsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
+      question_import_items: {
+        Row: QuestionImportItemsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
     };
     Views: {
       test_best_results: {
@@ -1508,6 +1574,37 @@ export type Database = {
         Args: Record<string, never>;
         Returns: number;
       };
+      // --- 0013 bulk question import (caller's own runs; authenticated only) ---
+      /** Existing-question fingerprints of 1–50 manageable courses (order by question_id to page). */
+      question_import_fingerprints: {
+        Args: { p_course_ids: string[] };
+        Returns: QuestionImportFingerprintsRow[];
+      };
+      /** Returns the new run id. */
+      start_question_import: {
+        Args: {
+          p_source: QuestionImportSourceColumn;
+          p_file_name: string;
+          p_file_sha256: string;
+          p_planned_creates: number;
+          p_planned_updates: number;
+          p_planned_excluded: number;
+        };
+        Returns: string;
+      };
+      /** Up to 100 rows in one transaction; {ok, run_id, created, updated, results[]}. */
+      import_question_chunk: {
+        Args: { p_run_id: string; p_items: Json };
+        Returns: Json;
+      };
+      finish_question_import: {
+        Args: { p_run_id: string };
+        Returns: Json;
+      };
+      discard_question_import: {
+        Args: { p_run_id: string };
+        Returns: Json;
+      };
     };
     Enums: {
       app_role: AppRoleColumn;
@@ -1531,6 +1628,9 @@ export type Database = {
       completion_event_type: CompletionEventTypeColumn;
       notification_type: NotificationTypeColumn;
       notification_entity: NotificationEntityColumn;
+      question_import_source: QuestionImportSourceColumn;
+      question_import_status: QuestionImportStatusColumn;
+      question_import_action: QuestionImportActionColumn;
     };
     CompositeTypes: {
       [_ in never]: never;

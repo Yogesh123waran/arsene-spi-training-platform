@@ -12,3 +12,4 @@ export * from "./results.repository";
 export * from "./performance.repository";
 export * from "./certificates.repository";
 export * from "./notifications.repository";
+export * from "./question-import.repository";
