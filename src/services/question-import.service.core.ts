@@ -324,9 +324,10 @@ export function createQuestionImportService(deps: QuestionImportServiceDeps) {
     },
 
     /**
-     * Discard a run (its creator or a super admin — 0013 decides): delete
-     * the drafts it created that are still unchanged and unused. Updates
-     * are never reverted. Safe to repeat.
+     * Discard an UNFINISHED run (its creator or a super admin — the
+     * database decides): delete the drafts it created that are still
+     * unchanged and unused. Updates are never reverted. A completed or
+     * already-discarded run is refused without any change (0014).
      */
     async discardImport(runIdInput: string): Promise<ImportDiscardOutcome> {
       await requireImporter();

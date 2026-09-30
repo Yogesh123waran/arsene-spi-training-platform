@@ -330,7 +330,7 @@ test("ACTIVE and ARCHIVED questions are protected from bulk update (service and 
 // ===========================================================================
 // Discard, ownership, limits
 // ===========================================================================
-test("discard: deletes the run's unchanged new drafts, keeps edited ones, never reverts updates; repeat is safe", async () => {
+test("discard: deletes the run's unchanged new drafts, keeps edited ones, never reverts updates; a repeat is refused (0014)", async () => {
   const svc = serviceFor("T1");
   const ctx = await svc.getContext({ source: "xlsx", courseCodes: [], questionIds: [ids.qd1] });
   const run = await svc.startImport(plan({ plannedCreates: 3, plannedUpdates: 1 }));
@@ -350,8 +350,9 @@ test("discard: deletes the run's unchanged new drafts, keeps edited ones, never 
   assert.equal(await count("question_text like 'Discard me %'"), 0);
   assert.equal(await count(`id = '${kept}'`), 1);
   assert.equal((await q(ids.qd1)).question_text, "Standard analog signal (bulk)?", "the update is not reverted");
-  const again = await svc.discardImport(run.id);
-  assert.equal(again.run.status, "discarded");
+  // 0014: only an unfinished import can be discarded — a repeat is refused and changes nothing.
+  await assert.rejects(svc.discardImport(run.id), (e) => e.code === "23514" && /Only an unfinished import can be discarded/.test(e.message));
+  assert.equal(await count(`id = '${kept}'`), 1);
 });
 
 test("ownership: another admin cannot import into or finish my run, but a super admin may discard it (0013 rule)", async () => {
