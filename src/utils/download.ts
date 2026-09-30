@@ -13,3 +13,4 @@ export function downloadFile(content: Uint8Array | string, fileName: string, mim
 
 export const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 export const CSV_MIME = "text/csv;charset=utf-8";
+export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";

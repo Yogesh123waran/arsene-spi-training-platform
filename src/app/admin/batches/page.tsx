@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -25,9 +26,11 @@ export default async function AdminBatchesPage() {
         title="Batches"
         description="Schedule and manage training batches for each course."
         actions={
-          <Button size="sm">
-            <Plus className="h-4 w-4" /> Add Batch
-          </Button>
+          <Link href="/admin/batches/new">
+            <Button size="sm">
+              <Plus className="h-4 w-4" /> Add Batch
+            </Button>
+          </Link>
         }
       />
       {loadError ? (

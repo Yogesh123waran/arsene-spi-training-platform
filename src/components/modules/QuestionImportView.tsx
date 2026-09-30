@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, FileSpreadsheet, Loader2, RotateCcw, Upload } from "lucide-react";
+import { ArrowLeft, CheckCircle2, FileSpreadsheet, FileText, Loader2, RotateCcw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card } from "@/components/ui/Card";
 import { Dialog } from "@/components/ui/Dialog";
@@ -31,7 +31,7 @@ import type {
   ParsedImportFile,
   RawImportRow,
 } from "@/types/question-import";
-import { CSV_MIME, XLSX_MIME, downloadFile } from "@/utils/download";
+import { CSV_MIME, DOCX_MIME, XLSX_MIME, downloadFile } from "@/utils/download";
 import { formatDateTime } from "@/utils/format";
 import { ImportSummaryTiles, QuestionImportPreview } from "./QuestionImportPreview";
 
@@ -59,11 +59,23 @@ function sourceOf(fileName: string): ImportSource | null {
   const lower = fileName.toLowerCase();
   if (lower.endsWith(".xlsx")) return "xlsx";
   if (lower.endsWith(".csv")) return "csv";
+  if (lower.endsWith(".docx")) return "docx";
+  if (lower.endsWith(".pdf")) return "pdf";
   return null;
 }
 
+type OcrProgress = { done: number; total: number; page: number };
+
+async function parseFile(source: ImportSource, buffer: ArrayBuffer, onOcrProgress: (p: OcrProgress) => void): Promise<ParsedImportFile> {
+  if (source === "xlsx") return (await import("@/lib/question-import/xlsx")).parseXlsx(buffer);
+  if (source === "docx") return (await import("@/lib/question-import/docx")).parseDocx(buffer);
+  // Scanned pages are read with OCR in this browser (the result's source is then "pdf_ocr").
+  if (source === "pdf") return (await import("@/lib/question-import/pdf")).parsePdf(buffer, { onProgress: onOcrProgress });
+  return (await import("@/lib/question-import/csv")).parseCsv(buffer);
+}
+
 /**
- * Bulk import from Excel/CSV. The file is read, validated and previewed in
+ * Bulk import from Excel, CSV, Word (.docx) or PDF. The file is read, validated and previewed in
  * the browser — it is never uploaded. Confirmed rows are sent in chunks of
  * at most 100 to the server, which re-validates every row; 0013 writes
  * them (always as drafts). The preview is advisory only.
@@ -79,6 +91,8 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
   const [courseId, setCourseId] = useState("");
   const [moduleId, setModuleId] = useState("");
   const [include, setInclude] = useState<Set<number>>(new Set());
+  const [confirmed, setConfirmed] = useState<Set<number>>(new Set());
+  const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null);
   const [validation, setValidation] = useState<{ results: ImportRowResult[]; summary: ImportPreviewSummary } | null>(null);
   const [validating, setValidating] = useState(false);
   const [activeRun, setActiveRun] = useState<ImportRunProgress | null>(null);
@@ -95,9 +109,10 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
   }, []);
 
   const rows: RawImportRow[] = useMemo(
-    () => (parsed ? parsed.rows.map((r) => ({ ...r, includeAnyway: include.has(r.rowNumber) })) : []),
-    [parsed, include]
+    () => (parsed ? parsed.rows.map((r) => ({ ...r, includeAnyway: include.has(r.rowNumber), reviewConfirmed: confirmed.has(r.rowNumber) })) : []),
+    [parsed, include, confirmed]
   );
+  const ocrRows = useMemo(() => (parsed ? parsed.rows.filter((r) => r.source?.uncertain).length : 0), [parsed]);
   const rawByRow = useMemo(() => new Map(rows.map((r) => [r.rowNumber, r])), [rows]);
   const courseCodeById = useMemo(() => new Map((context?.courses ?? []).map((c) => [c.id.toLowerCase(), c.code])), [context]);
   const needsCourse = parsed ? !parsed.everyRowHasCourse : false;
@@ -140,6 +155,8 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
     setCourseId("");
     setModuleId("");
     setInclude(new Set());
+    setConfirmed(new Set());
+    setOcrProgress(null);
     setValidation(null);
     setResult(null);
     setError(null);
@@ -151,7 +168,11 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
     reset();
     const source = sourceOf(f.name);
     if (!source) {
-      setFileErrors(["Choose an Excel workbook (.xlsx) or a CSV file (.csv). Older .xls files must be saved as .xlsx first."]);
+      setFileErrors([
+        f.name.toLowerCase().endsWith(".doc")
+          ? "Older Word .doc files can't be read. Open the file in Word and save it as .docx (Word Document)."
+          : "Choose an Excel workbook (.xlsx), a CSV file (.csv), a Word document (.docx) or a PDF (.pdf). Older .xls/.doc files must be saved as .xlsx/.docx first.",
+      ]);
       return;
     }
     const tooBig = checkFileSize(source, f.size);
@@ -163,7 +184,8 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
     try {
       const buffer = await f.arrayBuffer();
       const sha256 = await sha256Hex(buffer);
-      const p = source === "xlsx" ? await (await import("@/lib/question-import/xlsx")).parseXlsx(buffer) : (await import("@/lib/question-import/csv")).parseCsv(buffer);
+      const p = await parseFile(source, buffer, setOcrProgress);
+      setOcrProgress(null);
       if (p.fileErrors.length > 0) {
         setFileErrors(p.fileErrors);
         setStage("choose");
@@ -174,13 +196,14 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
         setStage("choose");
         return;
       }
-      setFile({ name: f.name, size: f.size, sha256, source });
+      // The parsed source: a scanned PDF read by OCR is imported as "pdf_ocr".
+      setFile({ name: f.name, size: f.size, sha256, source: p.source });
       setParsed(p);
       if (await loadContext(p, "")) setStage("preview");
       else setStage("choose");
     } catch (err) {
       console.error("[question-import] read failed:", err instanceof Error ? err.message : err);
-      setFileErrors(["The file could not be read. Check that it is a valid .xlsx or .csv file."]);
+      setFileErrors(["The file could not be read. Check that it is a valid .xlsx, .csv, .docx or .pdf file."]);
       setStage("choose");
     }
   }
@@ -191,7 +214,12 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
     if (parsed) await loadContext(parsed, id);
   }
 
-  async function downloadTemplate(format: "xlsx" | "csv") {
+  async function downloadTemplate(format: "xlsx" | "csv" | "docx") {
+    if (format === "docx") {
+      const w = await import("@/lib/question-import/docx-template");
+      downloadFile(w.templateDocxBytes(), w.DOCX_TEMPLATE_FILE_NAME, DOCX_MIME);
+      return;
+    }
     const t = await import("@/lib/question-import/export");
     if (format === "xlsx") downloadFile(await t.templateXlsxBytes(), t.exportFileName("template", "xlsx"), XLSX_MIME);
     else downloadFile(t.templateCsvText(), t.exportFileName("template", "csv"), CSV_MIME);
@@ -269,6 +297,9 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
 
   const importableCount = validation ? validation.summary.create + validation.summary.update : 0;
   const courseMissing = needsCourse && !courseId;
+  // Word and PDF files are documents: items are questions (Q1, Q2, …), and one course applies to the document.
+  const isWord = file?.source === "docx" || file?.source === "pdf" || file?.source === "pdf_ocr";
+  const itemLabel = isWord ? "Question" : "Row";
 
   return (
     <div className="flex flex-col gap-5">
@@ -294,31 +325,49 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
         <Card className="px-6 py-6">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
             <div className="max-w-2xl">
-              <h2 className="text-base font-semibold text-ink">Choose an Excel or CSV file</h2>
+              <h2 className="text-base font-semibold text-ink">Choose an Excel, CSV, Word or PDF file</h2>
               <p className="mt-1 text-sm text-ink-muted">
                 The file is read in your browser and is never uploaded. You will see a preview before anything is saved. New questions are always created as <strong>drafts</strong>; only draft questions can be updated.
               </p>
-              <p className="mt-2 text-xs text-ink-faint">Excel (.xlsx) up to 5,000 questions · CSV (.csv, UTF-8) up to 10,000 questions · 10 MB maximum.</p>
+              <ul className="mt-2 flex flex-col gap-0.5 text-xs text-ink-faint">
+                <li>Excel (.xlsx): up to 5,000 questions, 10 MB</li>
+                <li>CSV (.csv, UTF-8): up to 10,000 questions, 10 MB</li>
+                <li>Word (.docx): up to 1,000 questions, 15 MB — single choice, multiple choice and true/false, typed as in the Word template</li>
+                <li>PDF (.pdf): up to 1,000 questions, 25 MB — in the Word template&apos;s format (fill in the Word template and save it as PDF). Password-protected PDFs are not supported.</li>
+                <li>Scanned PDF: up to 100 scanned pages, read with OCR in your browser. Every OCR question must be checked against its page before it can be imported.</li>
+              </ul>
             </div>
             <div className="flex shrink-0 flex-col gap-2 text-sm">
               <span className="text-2xs font-semibold uppercase tracking-wide text-ink-faint">Official template</span>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button type="button" size="sm" variant="secondary" onClick={() => downloadTemplate("xlsx")}>
                   <FileSpreadsheet className="h-4 w-4" aria-hidden /> Template (.xlsx)
                 </Button>
                 <Button type="button" size="sm" variant="secondary" onClick={() => downloadTemplate("csv")}>
                   <FileSpreadsheet className="h-4 w-4" aria-hidden /> Template (.csv)
                 </Button>
+                <Button type="button" size="sm" variant="secondary" onClick={() => downloadTemplate("docx")}>
+                  <FileText className="h-4 w-4" aria-hidden /> Template (.docx)
+                </Button>
               </div>
             </div>
           </div>
           <label className="mt-5 flex cursor-pointer flex-col items-center gap-2 rounded-md border border-dashed border-surface-border bg-surface px-6 py-10 text-center hover:border-primary-300">
             {stage === "reading" ? <Loader2 className="h-6 w-6 animate-spin text-primary-500" aria-hidden /> : <Upload className="h-6 w-6 text-primary-500" aria-hidden />}
-            <span className="text-sm font-medium text-ink">{stage === "reading" ? "Reading the file…" : "Choose a file (.xlsx or .csv)"}</span>
+            <span className="text-sm font-medium text-ink">
+              {stage !== "reading"
+                ? "Choose a file (.xlsx, .csv, .docx or .pdf)"
+                : ocrProgress
+                  ? `Scanned PDF: reading page ${Math.min(ocrProgress.done + 1, ocrProgress.total)} of ${ocrProgress.total} with OCR…`
+                  : "Reading the file…"}
+            </span>
+            {stage === "reading" && ocrProgress && (
+              <span className="text-xs text-ink-muted">OCR runs in your browser and can take a while for many pages. Keep this page open.</span>
+            )}
             <input
               ref={inputRef}
               type="file"
-              accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+              accept=".xlsx,.csv,.docx,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
               className="sr-only"
               disabled={stage === "reading"}
               onChange={(e) => onFileChosen(e.target.files?.[0])}
@@ -349,7 +398,8 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
               <div>
                 <p className="text-sm font-semibold text-ink">{file.name}</p>
                 <p className="text-xs text-ink-muted">
-                  {(file.size / 1024).toFixed(0)} KB{parsed.sheetName ? ` · sheet "${parsed.sheetName}"` : ""} · {parsed.rows.length.toLocaleString("en-IN")} question rows
+                  {(file.size / 1024).toFixed(0)} KB{parsed.sheetName ? ` · sheet "${parsed.sheetName}"` : ""} · {parsed.rows.length.toLocaleString("en-IN")}{" "}
+                  {isWord ? `question${parsed.rows.length === 1 ? "" : "s"} found` : "question rows"}
                   {parsed.warnings.length > 0 ? ` · ${parsed.warnings.join(" ")}` : ""}
                 </p>
               </div>
@@ -360,13 +410,13 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
             {needsCourse && (
               <div className="grid gap-3 sm:grid-cols-2">
                 <Select
-                  label="Course for rows without a Course Code"
+                  label={isWord ? "Course for this document" : "Course for rows without a Course Code"}
                   value={courseId}
                   onChange={(e) => onCourseChange(e.target.value)}
                   options={[{ label: "Choose a course…", value: "" }, ...(context?.courses ?? []).map((c) => ({ label: c.title ? `${c.code} — ${c.title}` : c.code, value: c.id }))]}
                 />
                 <Select
-                  label="Module (optional) for rows without a Module Code"
+                  label={isWord ? "Module (optional) for questions without a Module Code" : "Module (optional) for rows without a Module Code"}
                   value={moduleId}
                   onChange={(e) => setModuleId(e.target.value)}
                   disabled={!selectedCourse}
@@ -374,7 +424,19 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
                 />
               </div>
             )}
-            {courseMissing && <p className="text-xs text-signal-amber">Some rows have no Course Code. Choose their course above — it is never guessed.</p>}
+            {courseMissing && (
+              <p className="text-xs text-signal-amber">
+                {isWord
+                  ? "Some questions have no Course Code. Choose the document's course above — it is never guessed. Questions that name a different course are refused."
+                  : "Some rows have no Course Code. Choose their course above — it is never guessed."}
+              </p>
+            )}
+            {ocrRows > 0 && (
+              <p role="status" className="rounded-sm border border-signal-amber/40 bg-signal-amberSoft/40 px-3 py-2 text-xs text-ink">
+                <strong>OCR was used</strong> for scanned pages: {ocrRows.toLocaleString("en-IN")} question{ocrRows === 1 ? " was" : "s were"} read from page images. OCR can misread text, so each one needs review: compare it with its page and tick
+                “Checked against page …”. Questions where OCR was unsure of the answer, marks, options or codes stay in review — correct the file or add them in the Question Bank.
+              </p>
+            )}
             {context && context.courses.length === 0 && <p className="text-sm text-signal-red">You don&apos;t have any courses to import into. Trainers can import only into courses of their upcoming or ongoing batches.</p>}
           </Card>
 
@@ -395,6 +457,18 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
               rawByRow={rawByRow}
               courseCodeById={courseCodeById}
               disabled={validating}
+              itemLabel={itemLabel}
+              onToggleConfirm={
+                ocrRows > 0
+                  ? (rowNumber, on) =>
+                      setConfirmed((prev) => {
+                        const next = new Set(prev);
+                        if (on) next.add(rowNumber);
+                        else next.delete(rowNumber);
+                        return next;
+                      })
+                  : undefined
+              }
               onToggleInclude={(rowNumber, on) =>
                 setInclude((prev) => {
                   const next = new Set(prev);
@@ -424,7 +498,7 @@ export function QuestionImportView({ basePath }: { basePath: string }) {
         </Card>
       )}
 
-      {stage === "done" && result && <ImportResult result={result} validation={validation} basePath={basePath} onRetry={runImport} onAnother={reset} />}
+      {stage === "done" && result && <ImportResult result={result} validation={validation} basePath={basePath} itemLabel={itemLabel} onRetry={runImport} onAnother={reset} />}
 
       <Dialog
         isOpen={confirmOpen}
@@ -446,12 +520,14 @@ function ImportResult({
   result,
   validation,
   basePath,
+  itemLabel,
   onRetry,
   onAnother,
 }: {
   result: RunOutcome;
   validation: { results: ImportRowResult[]; summary: ImportPreviewSummary } | null;
   basePath: string;
+  itemLabel: string;
   onRetry: () => void;
   onAnother: () => void;
 }) {
@@ -528,7 +604,9 @@ function ImportResult({
           <ul className="divide-y divide-surface-border">
             {pageRows.map((o) => (
               <li key={o.rowNumber} className="flex gap-4 px-5 py-2.5 text-sm">
-                <span className="w-16 shrink-0 text-xs tabular-nums text-ink-faint">Row {o.rowNumber}</span>
+                <span className="w-16 shrink-0 text-xs tabular-nums text-ink-faint">
+                  {itemLabel} {o.rowNumber}
+                </span>
                 <span className="text-ink-muted">{o.message ?? o.issues?.map((i) => i.message).join(" ") ?? (o.status === "DUPLICATE" ? "Duplicate." : "Not imported.")}</span>
               </li>
             ))}

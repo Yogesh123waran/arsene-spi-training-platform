@@ -16,7 +16,7 @@ import ts from "typescript";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
 const requireFromRoot = createRequire(path.join(root, "package.json"));
-const BARE = Object.fromEntries(["exceljs", "papaparse"].map((p) => [p, pathToFileURL(requireFromRoot.resolve(p)).href]));
+const BARE = Object.fromEntries(["exceljs", "papaparse", "pdfjs-dist/legacy/build/pdf.min.mjs", "pdfjs-dist/legacy/build/pdf.worker.min.mjs"].map((p) => [p, pathToFileURL(requireFromRoot.resolve(p)).href]));
 const pgBin = process.env.PG_BIN ?? (process.platform === "win32" ? "C:\\Program Files\\PostgreSQL\\18\\bin" : "/usr/lib/postgresql/18/bin");
 const exe = (name) => path.join(pgBin, process.platform === "win32" ? `${name}.exe` : name);
 if (!fs.existsSync(exe("psql"))) {
@@ -76,8 +76,8 @@ try {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(
       target,
-      code.replace(/(from\s+["'])([^"']+)(["'])/g, (whole, a, spec, b) => {
-        if (BARE[spec]) return a + BARE[spec] + b; // project packages (exceljs, papaparse)
+      code.replace(/((?:from\s+|import\(\s*)["'])([^"']+)(["'])/g, (whole, a, spec, b) => {
+        if (BARE[spec]) return a + BARE[spec] + b; // project packages (exceljs, papaparse, pdfjs-dist)
         if (!spec.startsWith("@/") && !spec.startsWith(".")) return whole;
         const abs = spec.startsWith("@/") ? path.join(out, spec.slice(2)) : path.resolve(path.dirname(target), spec);
         let rel2 = path.relative(path.dirname(target), abs + ".mjs").split(path.sep).join("/");

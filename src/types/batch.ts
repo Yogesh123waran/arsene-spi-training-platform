@@ -19,6 +19,37 @@ export interface Batch {
   updatedAt: string;
 }
 
+/** What the Add Batch form sends. Status is never part of it: new batches are always "upcoming". */
+export interface CreateBatchInput {
+  batchCode: string;
+  name: string;
+  courseId: string;
+  /** Optional: a batch can be created before a trainer is assigned. */
+  trainerId: string | null;
+  /** ISO date, YYYY-MM-DD. */
+  startDate: string;
+  /** ISO date, YYYY-MM-DD. */
+  endDate: string;
+  maxSeats: number;
+}
+
+export type BatchValidationErrors = Partial<Record<keyof CreateBatchInput, string>> & {
+  form?: string;
+};
+
+/** Form limits (the database requires non-blank code/name, end ≥ start and max seats > 0). */
+export const BATCH_INPUT_LIMITS = {
+  codeMax: 50,
+  nameMax: 150,
+  maxSeatsMax: 10000,
+} as const;
+
+/** Course and trainer choices for the Add Batch form (read with the caller's session). */
+export interface BatchFormOptions {
+  courses: { id: string; title: string; selectable: boolean }[];
+  trainers: { id: string; name: string; selectable: boolean }[];
+}
+
 /**
  * A batch as shown in the Batches table (admin and trainer). Built from
  * public.batches + its course, trainer and enrolments (Supabase mode),

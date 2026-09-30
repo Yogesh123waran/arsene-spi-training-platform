@@ -49,10 +49,14 @@ export interface QuestionImportPreviewProps {
   courseCodeById: Map<string, string>;
   onToggleInclude: (rowNumber: number, include: boolean) => void;
   disabled?: boolean;
+  /** How an item is labelled: "Row" (spreadsheet row) or "Question" (Word: the document's Q number). */
+  itemLabel?: string;
+  /** OCR rows: the reviewer confirmed the row against its scanned page. */
+  onToggleConfirm?: (rowNumber: number, confirmed: boolean) => void;
 }
 
 /** The validated rows, 50 at a time, filterable by status. Advisory only — the server re-checks every row. */
-export function QuestionImportPreview({ results, rawByRow, courseCodeById, onToggleInclude, disabled }: QuestionImportPreviewProps) {
+export function QuestionImportPreview({ results, rawByRow, courseCodeById, onToggleInclude, disabled, itemLabel = "Row", onToggleConfirm }: QuestionImportPreviewProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [page, setPage] = useState(0);
 
@@ -116,9 +120,13 @@ export function QuestionImportPreview({ results, rawByRow, courseCodeById, onTog
             const text = r.question?.text ?? (raw?.questionText || "(no question text)");
             const courseCode = r.question ? courseCodeById.get(r.question.courseId) : raw?.courseCode;
             const isDuplicate = r.status === "DUPLICATE" || r.includeAnyway;
+            // Read by OCR: the reviewer confirms it against the scanned page (clears only the OCR check).
+            const isOcr = !!raw?.source?.uncertain || typeof raw?.source?.ocrConfidence === "number";
             return (
               <li key={r.rowNumber} className="flex gap-4 px-5 py-3">
-                <div className="w-16 shrink-0 pt-0.5 text-xs tabular-nums text-ink-faint">Row {r.rowNumber}</div>
+                <div className="w-16 shrink-0 pt-0.5 text-xs tabular-nums text-ink-faint">
+                  {itemLabel} {r.rowNumber}
+                </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={badge.tone}>{badge.label}</Badge>
@@ -145,17 +153,33 @@ export function QuestionImportPreview({ results, rawByRow, courseCodeById, onTog
                     </ul>
                   )}
                 </div>
-                {isDuplicate && (
-                  <label className="flex shrink-0 cursor-pointer items-start gap-2 pt-0.5 text-xs text-ink">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 h-4 w-4 accent-primary-500"
-                      checked={r.includeAnyway}
-                      disabled={disabled}
-                      onChange={(e) => onToggleInclude(r.rowNumber, e.target.checked)}
-                    />
-                    Include anyway
-                  </label>
+                {(isDuplicate || (isOcr && onToggleConfirm)) && (
+                  <div className="flex shrink-0 flex-col gap-1.5 pt-0.5">
+                    {isOcr && onToggleConfirm && (
+                      <label className="flex cursor-pointer items-start gap-2 text-xs text-ink">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-4 w-4 accent-primary-500"
+                          checked={!!raw?.reviewConfirmed}
+                          disabled={disabled}
+                          onChange={(e) => onToggleConfirm(r.rowNumber, e.target.checked)}
+                        />
+                        Checked against {raw?.source?.page ? `page ${raw.source.page}` : "the page"}
+                      </label>
+                    )}
+                    {isDuplicate && (
+                      <label className="flex cursor-pointer items-start gap-2 text-xs text-ink">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 h-4 w-4 accent-primary-500"
+                          checked={r.includeAnyway}
+                          disabled={disabled}
+                          onChange={(e) => onToggleInclude(r.rowNumber, e.target.checked)}
+                        />
+                        Include anyway
+                      </label>
+                    )}
+                  </div>
                 )}
               </li>
             );

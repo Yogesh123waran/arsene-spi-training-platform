@@ -8,7 +8,7 @@ export default function TrainerQuestionImportPage() {
     <div>
       <PageHeader
         title="Import questions"
-        description="Add or update questions for the courses you currently teach from an Excel or CSV file. Imported questions are always drafts."
+        description="Add or update questions for the courses you currently teach from an Excel, CSV, Word or PDF file. Imported questions are always drafts."
       />
       <QuestionImportView basePath="/trainer/questions" />
     </div>

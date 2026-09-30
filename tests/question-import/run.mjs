@@ -14,7 +14,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
 // The build folder is outside the project: point package imports at the project's node_modules.
 const requireFromRoot = createRequire(path.join(root, "package.json"));
-const BARE = Object.fromEntries(["exceljs", "papaparse"].map((p) => [p, pathToFileURL(requireFromRoot.resolve(p)).href]));
+const BARE = Object.fromEntries(["exceljs", "papaparse", "pdfjs-dist/legacy/build/pdf.min.mjs", "pdfjs-dist/legacy/build/pdf.worker.min.mjs"].map((p) => [p, pathToFileURL(requireFromRoot.resolve(p)).href]));
 const out = fs.mkdtempSync(path.join(os.tmpdir(), "question-import-core-"));
 
 const sources = [
@@ -29,8 +29,8 @@ for (const rel of sources) {
   }).outputText;
   const target = path.join(out, rel.replace(/^src\//, "").replace(/\.ts$/, ".mjs"));
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  const rewritten = code.replace(/(from\s+["'])([^"']+)(["'])/g, (whole, a, spec, b) => {
-    if (BARE[spec]) return a + BARE[spec] + b; // project packages (exceljs, papaparse)
+  const rewritten = code.replace(/((?:from\s+|import\(\s*)["'])([^"']+)(["'])/g, (whole, a, spec, b) => {
+    if (BARE[spec]) return a + BARE[spec] + b; // project packages (exceljs, papaparse, pdfjs-dist)
     if (!spec.startsWith("@/") && !spec.startsWith(".")) return whole;
     const abs = spec.startsWith("@/") ? path.join(out, spec.slice(2)) : path.resolve(path.dirname(target), spec);
     let rel2 = path.relative(path.dirname(target), abs + ".mjs").split(path.sep).join("/");

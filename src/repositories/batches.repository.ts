@@ -2,7 +2,7 @@ import "server-only";
 import { authConfig } from "@/config/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { batchTableRows, getBatchesForTrainer } from "@/lib/mock/batches-table.mock";
-import type { BatchSummary } from "@/types/batch";
+import type { BatchSummary, CreateBatchInput } from "@/types/batch";
 
 /**
  * Batches repository — the only module that knows where batch data
@@ -14,11 +14,11 @@ import type { BatchSummary } from "@/types/batch";
  *     batch_students (0003_core_training_model.sql), read with the
  *     caller's session.
  *
- * Read-only for now (Add/View/Edit are a separate future task — batch
- * edits are admin-only and reassigning a trainer moves the batch's
- * scheduled/live classes). Services call this; UI components never do.
- * RLS is the authoritative boundary; the scope below is the second
- * layer.
+ * Reads, plus creating a batch (Super Admin, via RLS). View/Edit are a
+ * separate future task — batch edits are admin-only and reassigning a
+ * trainer moves the batch's scheduled/live classes. Services call this;
+ * UI components never do. RLS is the authoritative boundary; the scope
+ * below is the second layer.
  */
 
 const GENERIC_DB_ERROR = "We couldn't reach the database. Please try again.";
@@ -26,9 +26,12 @@ const GENERIC_DB_ERROR = "We couldn't reach the database. Please try again.";
 export const BATCH_TRAINER_NOT_ASSIGNED = "Trainer not assigned";
 
 export class BatchRepositoryError extends Error {
-  constructor(message: string = GENERIC_DB_ERROR) {
+  /** Postgres error code, when the database raised one. */
+  readonly code: string;
+  constructor(message: string = GENERIC_DB_ERROR, code = "") {
     super(message);
     this.name = "BatchRepositoryError";
+    this.code = code;
   }
 }
 
@@ -98,5 +101,46 @@ export const batchesRepository = {
       logDbError("findAll failed", err);
       throw new BatchRepositoryError();
     }
+  },
+
+  /**
+   * Insert a new batch with the caller's own session (RLS: Super Admin
+   * only). Always status "upcoming". Returns the new id. The Postgres
+   * error code is kept (e.g. 23505 for a duplicate batch code) so the
+   * service can explain it; raw messages never leave the server.
+   */
+  async create(input: CreateBatchInput, createdBy: string): Promise<string> {
+    if (authConfig.mode === "demo") {
+      throw new BatchRepositoryError("Creating batches requires Supabase mode.");
+    }
+    const supabase = await createSupabaseServerClient();
+    if (!supabase) throw new BatchRepositoryError();
+
+    let result: { data: { id: string } | null; error: { code?: string; message?: string } | null };
+    try {
+      result = await supabase
+        .from("batches")
+        .insert({
+          batch_code: input.batchCode,
+          name: input.name,
+          course_id: input.courseId,
+          trainer_id: input.trainerId,
+          start_date: input.startDate,
+          end_date: input.endDate,
+          max_seats: input.maxSeats,
+          status: "upcoming",
+          created_by: createdBy,
+        })
+        .select("id")
+        .single();
+    } catch (err) {
+      logDbError("create failed", err);
+      throw new BatchRepositoryError("We couldn't create the batch. Please try again.");
+    }
+    if (result.error || !result.data) {
+      logDbError("create failed", result.error ? `${result.error.code ?? ""} ${result.error.message ?? ""}` : "no row returned");
+      throw new BatchRepositoryError("We couldn't create the batch. Please try again.", result.error?.code ?? "");
+    }
+    return result.data.id;
   },
 };

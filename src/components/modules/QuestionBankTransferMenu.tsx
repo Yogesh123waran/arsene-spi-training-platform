@@ -12,7 +12,7 @@ import { CSV_MIME, XLSX_MIME, downloadFile } from "@/utils/download";
 import type { ExportMode } from "@/types/question-import";
 
 /**
- * Question Bank header actions: Import questions (Excel/CSV) and Export
+ * Question Bank header actions: Import questions (Excel/CSV/Word) and Export
  * (the caller's own scope, built in the browser). Staff-only pages.
  */
 export function QuestionBankTransferMenu() {
