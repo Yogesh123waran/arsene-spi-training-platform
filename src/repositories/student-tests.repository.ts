@@ -104,6 +104,14 @@ export const studentTestsRepository = {
     return run("submitAttempt", () => supabase.rpc("submit_test_attempt", { p_attempt_id: attemptId }));
   },
 
+  /** Note one browser activity signal (record_attempt_client_event, 0015). */
+  async recordClientEvent(attemptId: string, kind: string, detail: Json): Promise<Json> {
+    const supabase = await client();
+    return run("recordClientEvent", () =>
+      supabase.rpc("record_attempt_client_event", { p_attempt_id: attemptId, p_kind: kind, p_detail: detail })
+    );
+  },
+
   /** Attempt state; score/review only once released (get_attempt_result). */
   async attemptResult(attemptId: string): Promise<Json> {
     const supabase = await client();

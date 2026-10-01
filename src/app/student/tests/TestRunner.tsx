@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Clock, AlertTriangle, CheckCircle2, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clock, AlertTriangle, CheckCircle2, Info, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Dialog } from "@/components/ui/Dialog";
@@ -12,6 +12,7 @@ import { useToast } from "@/components/ui/Toast";
 import { cn } from "@/utils/cn";
 import { saveTestAnswerAction, submitTestAttemptAction } from "@/services/student-tests.actions";
 import type { StudentAttemptPaper, StudentPaperQuestion } from "@/types/student-test";
+import { useExamIntegrity } from "./useExamIntegrity";
 
 type SaveState = "saving" | "saved" | "error";
 
@@ -36,6 +37,9 @@ const TYPE_HINT: Record<StudentPaperQuestion["questionType"], string> = {
  * through the server; the countdown is display-only and synchronised to
  * the server clock — the database enforces the real deadline (+5 s
  * grace), grading and results. Nothing here decides correctness.
+ * Browser activity (tab switches, offline, copy/paste, print, a second
+ * tab) is noted for review through useExamIntegrity — best effort, never
+ * a penalty, and independent of saving and submitting.
  */
 export function TestRunner({ paper }: { paper: StudentAttemptPaper }) {
   const router = useRouter();
@@ -52,6 +56,9 @@ export function TestRunner({ paper }: { paper: StudentAttemptPaper }) {
   const [overMessage, setOverMessage] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  // The attempt is over on this page (submitted or stopped by the server): stop activity reporting.
+  const [finished, setFinished] = useState(false);
+  const areaRef = useRef<HTMLDivElement>(null);
 
   // Server clock sync: offset = server time − local time; deadline from the server.
   const offsetRef = useRef(new Date(paper.serverNow).getTime() - Date.now());
@@ -79,6 +86,7 @@ export function TestRunner({ paper }: { paper: StudentAttemptPaper }) {
     (message: string) => {
       if (stopped.current) return;
       stopped.current = true;
+      setFinished(true);
       setOverMessage(message);
       router.refresh();
     },
@@ -177,6 +185,7 @@ export function TestRunner({ paper }: { paper: StudentAttemptPaper }) {
           return;
         }
         stopped.current = true;
+        setFinished(true);
         showToast({
           variant: "success",
           title: result.alreadyFinished ? "This attempt had already finished." : automatic ? "Time is up — your answers were submitted." : "Test submitted.",
@@ -214,6 +223,7 @@ export function TestRunner({ paper }: { paper: StudentAttemptPaper }) {
     [answers, questions]
   );
   const unanswered = total - answeredCount;
+  const { otherTabs } = useExamIntegrity(paper.attemptId, !finished, areaRef);
   const question = questions[current];
   const savingAny = Object.values(saveState).some((s) => s === "saving");
 
@@ -273,79 +283,104 @@ export function TestRunner({ paper }: { paper: StudentAttemptPaper }) {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_240px]">
-        <Card>
-          <CardContent className="flex flex-col gap-5">
-            <div>
-              <div className="mb-2 flex items-center justify-between text-xs text-ink-muted">
-                <span>
-                  Question {current + 1} of {total} · {question.marks} {question.marks === 1 ? "mark" : "marks"}
-                </span>
-                <span>
-                  {answeredCount} answered
-                  {qState === "saving" && " · Saving…"}
-                  {qState === "saved" && " · Saved"}
-                  {qState === "error" && " · Not saved"}
-                </span>
+      <div className="rounded-lg border border-surface-border bg-surface-raised px-4 py-3 text-xs text-ink-muted print:hidden">
+        <p className="mb-1.5 flex items-center gap-1.5 font-semibold text-ink">
+          <Info className="h-3.5 w-3.5" /> About this test
+        </p>
+        <ul className="list-disc space-y-0.5 pl-5">
+          <li>The official timer is kept by the server; the countdown here follows it.</li>
+          <li>Your answers are saved automatically. Please finish by selecting Submit test.</li>
+          <li>
+            To support fair assessment, some browser activity is noted — for example switching tabs or windows, going offline, copying or
+            pasting, printing, or opening this test in another tab.
+          </li>
+          <li>These notes are for your trainer to review. They don&apos;t change your answers or your score, and switching briefly to a class call is fine.</li>
+        </ul>
+      </div>
+
+      {otherTabs > 0 && (
+        <div role="status" className="rounded-md border border-surface-border bg-surface-raised px-3 py-2 text-xs text-ink-muted print:hidden">
+          This test is also open in another tab. Please continue in one tab — both tabs save to the same attempt.
+        </div>
+      )}
+
+      <p className="hidden text-sm text-ink-muted print:block">Test questions are not included when this page is printed.</p>
+
+      <div className="grid grid-cols-1 gap-4 print:hidden lg:grid-cols-[1fr_240px]">
+        <div ref={areaRef} className="min-w-0">
+          <Card>
+            <CardContent className="flex flex-col gap-5">
+              <div>
+                <div className="mb-2 flex items-center justify-between text-xs text-ink-muted">
+                  <span>
+                    Question {current + 1} of {total} · {question.marks} {question.marks === 1 ? "mark" : "marks"}
+                  </span>
+                  <span>
+                    {answeredCount} answered
+                    {qState === "saving" && " · Saving…"}
+                    {qState === "saved" && " · Saved"}
+                    {qState === "error" && " · Not saved"}
+                  </span>
+                </div>
+                <ProgressBar value={answeredCount} max={total} tone="teal" />
               </div>
-              <ProgressBar value={answeredCount} max={total} tone="teal" />
-            </div>
 
-            <div>
-              <p className="text-sm font-medium text-ink">{question.questionText}</p>
-              <p className="mt-1 text-xs text-ink-muted">{TYPE_HINT[question.questionType]}</p>
-            </div>
+              <div>
+                <p className="text-sm font-medium text-ink">{question.questionText}</p>
+                <p className="mt-1 text-xs text-ink-muted">{TYPE_HINT[question.questionType]}</p>
+              </div>
 
-            <div role={question.questionType === "multiple_choice" ? "group" : "radiogroup"} className="flex flex-col gap-2">
-              {question.options.map((option) => {
-                const isSelected = selected.includes(option.id);
-                const multi = question.questionType === "multiple_choice";
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    role={multi ? "checkbox" : "radio"}
-                    aria-checked={isSelected}
-                    disabled={isSubmitting}
-                    onClick={() => choose(question, option.id)}
-                    className={cn(
-                      "flex items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition-colors",
-                      isSelected
-                        ? "border-primary-500 bg-primary-50 text-primary-700"
-                        : "border-surface-border bg-surface-raised text-ink hover:border-primary-300"
-                    )}
-                  >
-                    <span
+              <div role={question.questionType === "multiple_choice" ? "group" : "radiogroup"} className="flex flex-col gap-2">
+                {question.options.map((option) => {
+                  const isSelected = selected.includes(option.id);
+                  const multi = question.questionType === "multiple_choice";
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      role={multi ? "checkbox" : "radio"}
+                      aria-checked={isSelected}
+                      disabled={isSubmitting}
+                      onClick={() => choose(question, option.id)}
                       className={cn(
-                        "flex h-4 w-4 shrink-0 items-center justify-center border-2",
-                        multi ? "rounded" : "rounded-full",
-                        isSelected ? "border-primary-500" : "border-surface-border"
+                        "flex items-center gap-3 rounded-lg border px-4 py-3 text-left text-sm transition-colors",
+                        isSelected
+                          ? "border-primary-500 bg-primary-50 text-primary-700"
+                          : "border-surface-border bg-surface-raised text-ink hover:border-primary-300"
                       )}
                     >
-                      {isSelected && <span className={cn("h-2 w-2 bg-primary-500", multi ? "rounded-sm" : "rounded-full")} />}
-                    </span>
-                    {option.text}
-                  </button>
-                );
-              })}
-            </div>
+                      <span
+                        className={cn(
+                          "flex h-4 w-4 shrink-0 items-center justify-center border-2",
+                          multi ? "rounded" : "rounded-full",
+                          isSelected ? "border-primary-500" : "border-surface-border"
+                        )}
+                      >
+                        {isSelected && <span className={cn("h-2 w-2 bg-primary-500", multi ? "rounded-sm" : "rounded-full")} />}
+                      </span>
+                      {option.text}
+                    </button>
+                  );
+                })}
+              </div>
 
-            <div className="flex items-center justify-between border-t border-surface-border pt-4">
-              <Button variant="secondary" onClick={() => setCurrent((c) => Math.max(0, c - 1))} disabled={current === 0}>
-                <ChevronLeft className="h-4 w-4" /> Previous
-              </Button>
-              {current === total - 1 ? (
-                <Button onClick={() => setConfirming(true)} isLoading={isSubmitting}>
-                  Submit test
+              <div className="flex items-center justify-between border-t border-surface-border pt-4">
+                <Button variant="secondary" onClick={() => setCurrent((c) => Math.max(0, c - 1))} disabled={current === 0}>
+                  <ChevronLeft className="h-4 w-4" /> Previous
                 </Button>
-              ) : (
-                <Button onClick={() => setCurrent((c) => Math.min(total - 1, c + 1))}>
-                  Next <ChevronRight className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+                {current === total - 1 ? (
+                  <Button onClick={() => setConfirming(true)} isLoading={isSubmitting}>
+                    Submit test
+                  </Button>
+                ) : (
+                  <Button onClick={() => setCurrent((c) => Math.min(total - 1, c + 1))}>
+                    Next <ChevronRight className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
         <Card className="h-fit">
           <CardContent>

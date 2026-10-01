@@ -93,6 +93,27 @@ export async function saveTestAnswerAction(
   }
 }
 
+export interface ClientEventsResult {
+  ok: boolean;
+  /** Stop reporting: the attempt is no longer in progress. */
+  stop?: boolean;
+}
+
+/**
+ * Best-effort browser activity signals for an in-progress attempt (0015).
+ * Never throws and never returns error text: a failed report must not
+ * affect the test. Details are reduced server-side to non-sensitive fields.
+ */
+export async function recordAttemptClientEventsAction(attemptId: string, events: unknown): Promise<ClientEventsResult> {
+  try {
+    const out = await studentTestsService.recordClientEvents(attemptId, events);
+    return { ok: true, stop: out.stop };
+  } catch (err) {
+    console.error("[student-tests.actions] recordClientEvents:", err instanceof Error ? err.message : err);
+    return { ok: false };
+  }
+}
+
 export interface SubmitAttemptResult {
   ok: boolean;
   status?: AttemptStatus;

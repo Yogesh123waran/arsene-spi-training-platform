@@ -14,6 +14,7 @@ import {
   Award,
   Bell,
   Settings,
+  ShieldCheck,
 } from "lucide-react";
 
 export type PortalRole = "admin" | "trainer" | "student";
@@ -39,6 +40,7 @@ export const navigationByRole: Record<PortalRole, NavItem[]> = {
     { label: "Classes", href: "/admin/classes", icon: CalendarDays },
     { label: "Attendance", href: "/admin/attendance", icon: ClipboardCheck },
     { label: "Tests", href: "/admin/tests", icon: FileQuestion },
+    { label: "Exam Monitoring", href: "/admin/exam-monitoring", icon: ShieldCheck },
     { label: "Question Bank", href: "/admin/questions", icon: HelpCircle },
     { label: "Performance", href: "/admin/performance", icon: LineChart },
     { label: "Reports", href: "/admin/reports", icon: FileBarChart },
@@ -54,6 +56,7 @@ export const navigationByRole: Record<PortalRole, NavItem[]> = {
     { label: "Classes", href: "/trainer/classes", icon: CalendarDays },
     { label: "Attendance", href: "/trainer/attendance", icon: ClipboardCheck },
     { label: "Tests", href: "/trainer/tests", icon: FileQuestion },
+    { label: "Exam Monitoring", href: "/trainer/exam-monitoring", icon: ShieldCheck },
     { label: "Question Bank", href: "/trainer/questions", icon: HelpCircle },
     { label: "Performance", href: "/trainer/performance", icon: LineChart },
     { label: "Reports", href: "/trainer/reports", icon: FileBarChart },

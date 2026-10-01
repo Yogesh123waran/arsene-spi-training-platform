@@ -4,6 +4,12 @@ import { authService } from "./auth.service";
 import { studentTestsRepository, StudentTestRepositoryError } from "@/repositories/student-tests.repository";
 import type { AuthUser } from "@/types/auth";
 import type { TestStatus, TestType } from "@/types/test";
+import type { Json } from "@/lib/supabase/types";
+import {
+  MAX_EVENTS_PER_REPORT,
+  isReportedClientEventKind,
+  sanitizeClientEventDetail,
+} from "@/lib/student-tests/client-events";
 import type {
   AttemptFinalizeReason,
   AttemptStatus,
@@ -259,6 +265,12 @@ export interface SubmitOutcome {
   alreadyFinished: boolean;
 }
 
+export interface ClientEventsOutcome {
+  recorded: number;
+  /** The attempt is not (or no longer) open for reports: the browser should stop. */
+  stop: boolean;
+}
+
 export const studentTestsService = {
   /** null in demo mode (the page shows an empty state). */
   async listTests(): Promise<StudentTestSummary[] | null> {
@@ -345,6 +357,27 @@ export const studentTestsService = {
       finalizeReason: (strOrNull(o, "finalize_reason") as AttemptFinalizeReason | null) ?? null,
       alreadyFinished: bool(o, "already_finished"),
     };
+  },
+
+  /**
+   * Browser activity signals (0015). Only the known kinds, at most
+   * MAX_EVENTS_PER_REPORT per call, with details reduced to the known
+   * non-sensitive fields. The database checks the student, ownership,
+   * that the attempt is in progress, and rate limits; it stamps the time.
+   */
+  async recordClientEvents(attemptId: string, events: unknown): Promise<ClientEventsOutcome> {
+    await requireStudent();
+    if (!isUuid(attemptId) || !Array.isArray(events)) return { recorded: 0, stop: false };
+    let recorded = 0;
+    for (const event of events.slice(0, MAX_EVENTS_PER_REPORT)) {
+      const e = asObj(event);
+      if (!isReportedClientEventKind(e.kind)) continue;
+      const detail = sanitizeClientEventDetail(e.kind, e.detail) as unknown as Json;
+      const o = asObj(await studentTestsRepository.recordClientEvent(attemptId, e.kind, detail));
+      if (o.ok !== true) return { recorded, stop: true }; // not_found / attempt_finished
+      if (o.recorded === true) recorded++;
+    }
+    return { recorded, stop: false };
   },
 };
 

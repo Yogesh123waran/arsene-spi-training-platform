@@ -1,5 +1,5 @@
 // Bulk Question Import — repository/service integration tests against a
-// throwaway local PostgreSQL with migrations 0001–0014 (never Supabase).
+// throwaway local PostgreSQL with migrations 0001–0015 (never Supabase).
 //   PG_BIN="C:\Program Files\PostgreSQL\18\bin" node tests/question-import-db/run.mjs
 // Creates a temporary cluster, applies the Supabase role/auth stand-in
 // (fixtures/bootstrap.sql), every migration, and the seed; transpiles the
@@ -43,17 +43,17 @@ try {
   r = psql(["-d", "postgres", "-c", "create database qi_test"]);
   if (r.status !== 0) throw new Error(r.stderr);
 
-  // 2. Supabase stand-in, migrations 0001–0014, seed
+  // 2. Supabase stand-in, migrations 0001–0015, seed
   const files = [
     path.join(here, "fixtures/bootstrap.sql"),
-    ...fs.readdirSync(path.join(root, "supabase/migrations")).filter((f) => /^00(0\d|1[0-4])_.*\.sql$/.test(f)).sort().map((f) => path.join(root, "supabase/migrations", f)),
+    ...fs.readdirSync(path.join(root, "supabase/migrations")).filter((f) => /^00(0\d|1[0-5])_.*\.sql$/.test(f)).sort().map((f) => path.join(root, "supabase/migrations", f)),
     path.join(here, "fixtures/seed.sql"),
   ];
   for (const file of files) {
     r = psql(["-d", "qi_test", "-v", "ON_ERROR_STOP=1", "-f", file]);
     if (r.status !== 0) throw new Error(`${path.basename(file)} failed:\n${r.stderr}`);
   }
-  console.log(`database ready: ${files.length - 2} migrations (0001–0014) + seed`);
+  console.log(`database ready: ${files.length - 2} migrations (0001–0015) + seed`);
 
   // 3. Transpile the real modules under test
   const out = path.join(work, "build");
@@ -67,6 +67,12 @@ try {
     ...fs.readdirSync(path.join(root, "src/lib/question-import")).filter((f) => f.endsWith(".ts")).map((f) => `src/lib/question-import/${f}`),
     "src/repositories/question-import.repository.core.ts",
     "src/services/question-import.service.core.ts",
+    // Exam monitoring (Anti-Malpractice Step 4)
+    "src/types/exam-monitoring.ts",
+    "src/lib/student-tests/client-events.ts",
+    "src/lib/exam-monitoring/events.ts",
+    "src/repositories/exam-monitoring.repository.core.ts",
+    "src/services/exam-monitoring.service.core.ts",
   ];
   for (const rel of sources) {
     const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {

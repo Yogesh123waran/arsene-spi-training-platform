@@ -634,7 +634,17 @@ export type TestSecurityEventTypeColumn =
   | "cancellation_finalization"
   | "withdrawal_finalization"
   | "invalid_attempt_access"
-  | "suspicious_repeated_access";
+  | "suspicious_repeated_access"
+  // 0015 (exam integrity foundation)
+  | "concurrent_session"
+  | "client_hidden"
+  | "client_offline"
+  | "client_online"
+  | "client_copy"
+  | "client_paste"
+  | "client_print"
+  | "client_multiple_tabs"
+  | "client_fullscreen_exit";
 
 /**
  * public.test_attempts. SELECT only, for super admins and the batch's
@@ -1490,6 +1500,11 @@ export type Database = {
       };
       get_attempt_result: {
         Args: { p_attempt_id: string };
+        Returns: Json;
+      };
+      /** Student-reported browser signal for the caller's own in-progress attempt (0015). */
+      record_attempt_client_event: {
+        Args: { p_attempt_id: string; p_kind: string; p_detail?: Json };
         Returns: Json;
       };
       staff_finalize_due_attempts: {

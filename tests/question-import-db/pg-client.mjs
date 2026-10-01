@@ -3,7 +3,7 @@
 // given role ("authenticated" / "anon") with request.jwt.claims set, so RLS,
 // grants and the 0013 functions behave as they do behind PostgREST.
 // Supports exactly what question-import.repository.core.ts uses:
-//   rpc(fn, args) · from(table).select(cols) · eq · in · gt · order · limit · maybeSingle
+//   rpc(fn, args) · from(table).select(cols) · eq · in · gt · gte · lte · order · limit · maybeSingle
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -74,7 +74,7 @@ export class PgDatabase {
 }
 
 export class PgClient {
-  /** identity: { role: "authenticated" | "anon", userId?: string } */
+  /** identity: { role: "authenticated" | "anon", userId?: string, sessionId?: string (the JWT "session_id" claim) } */
   constructor(db, identity) {
     this.db = db;
     this.identity = identity;
@@ -90,8 +90,8 @@ export class PgClient {
     return this.execute(`select coalesce(to_jsonb((${query})), 'null'::jsonb)::text`);
   }
   async execute(query) {
-    const { role, userId } = this.identity;
-    const claims = userId ? JSON.stringify({ sub: userId }) : "";
+    const { role, userId, sessionId } = this.identity;
+    const claims = userId ? JSON.stringify(sessionId ? { sub: userId, session_id: sessionId } : { sub: userId }) : "";
     const sql = `set role ${role === "anon" ? "anon" : "authenticated"};\nselect set_config('request.jwt.claims', ${quote(claims)}, false);\n${query};\n`;
     const { stdout, stderr, code } = await this.db.run(sql);
     if (code) {
@@ -114,6 +114,8 @@ class Builder {
   }
   eq(col, v) { this.filters.push(`${ident(col)} = ${lit(v)}`); return this; }
   gt(col, v) { this.filters.push(`${ident(col)} > ${lit(v)}`); return this; }
+  gte(col, v) { this.filters.push(`${ident(col)} >= ${lit(v)}`); return this; }
+  lte(col, v) { this.filters.push(`${ident(col)} <= ${lit(v)}`); return this; }
   in(col, values) { this.filters.push(values.length ? `${ident(col)} in (${values.map(lit).join(", ")})` : "false"); return this; }
   order(col, opts = {}) { this.orderBy = `${ident(col)} ${opts.ascending === false ? "desc" : "asc"}`; return this; }
   limit(n) { this.limitN = n; return this; }
