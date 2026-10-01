@@ -1,5 +1,5 @@
 // Bulk Question Import — repository/service integration tests against a
-// throwaway local PostgreSQL with migrations 0001–0016 (never Supabase).
+// throwaway local PostgreSQL with migrations 0001–0017 (never Supabase).
 //   PG_BIN="C:\Program Files\PostgreSQL\18\bin" node tests/question-import-db/run.mjs
 // Creates a temporary cluster, applies the Supabase role/auth stand-in
 // (fixtures/bootstrap.sql), every migration, and the seed; transpiles the
@@ -43,17 +43,17 @@ try {
   r = psql(["-d", "postgres", "-c", "create database qi_test"]);
   if (r.status !== 0) throw new Error(r.stderr);
 
-  // 2. Supabase stand-in, migrations 0001–0016, seed
+  // 2. Supabase stand-in, migrations 0001–0017, seed
   const files = [
     path.join(here, "fixtures/bootstrap.sql"),
-    ...fs.readdirSync(path.join(root, "supabase/migrations")).filter((f) => /^00(0\d|1[0-6])_.*\.sql$/.test(f)).sort().map((f) => path.join(root, "supabase/migrations", f)),
+    ...fs.readdirSync(path.join(root, "supabase/migrations")).filter((f) => /^00(0\d|1[0-7])_.*\.sql$/.test(f)).sort().map((f) => path.join(root, "supabase/migrations", f)),
     path.join(here, "fixtures/seed.sql"),
   ];
   for (const file of files) {
     r = psql(["-d", "qi_test", "-v", "ON_ERROR_STOP=1", "-f", file]);
     if (r.status !== 0) throw new Error(`${path.basename(file)} failed:\n${r.stderr}`);
   }
-  console.log(`database ready: ${files.length - 2} migrations (0001–0016) + seed`);
+  console.log(`database ready: ${files.length - 2} migrations (0001–0017) + seed`);
 
   // 3. Transpile the real modules under test
   const out = path.join(work, "build");
