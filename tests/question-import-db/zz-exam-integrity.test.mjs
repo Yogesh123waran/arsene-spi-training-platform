@@ -1,6 +1,6 @@
 // Integration (0015): exam integrity foundation — session binding, client-reported events and
 // audit throttling — plus proof that the 0009 engine is unchanged: the same scenario is run on a
-// second throwaway database with only 0001–0014 and the results must match; the re-created
+// second throwaway database with every migration except 0015 and the results must match; the re-created
 // functions must equal 0009 once the lines tagged "-- 0015" are removed.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
@@ -16,6 +16,8 @@ const MIGRATIONS = path.resolve(here, "../../supabase/migrations");
 const read = (file) => fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
 const migrationFiles = (re) => fs.readdirSync(MIGRATIONS).filter((f) => re.test(f)).sort().map((f) => path.join(MIGRATIONS, f));
 const M0015 = path.join(MIGRATIONS, "0015_exam_integrity_foundation.sql");
+/** The baseline: every migration except 0015 (0015 is what these tests isolate). */
+const migrationsWithout0015 = () => migrationFiles(/^00\d\d_.*\.sql$/).filter((f) => f !== M0015);
 
 const BASE_DB = "qi_exam_base_0014";
 const EMPTY_DB = "qi_exam_empty";
@@ -41,6 +43,7 @@ async function world(dbx) {
   await dbx.exec(`
     insert into t.ids (k, v) select 'ei_' || k, gen_random_uuid() from unnest(array['S1','S2','S3','S4','S5','S6','CL']) k;
     insert into auth.users (id) select v from t.ids where k like 'ei_S_';
+    update public.profiles set account_status = 'active' where id in (select v from t.ids where k like 'ei_S_');
     insert into public.students (id, student_code, full_name) select v, k, 'Exam ' || k from t.ids where k like 'ei_S_';
     insert into public.batch_students (batch_id, student_id)
       select (select id from public.batches where batch_code = 'B1'), v from t.ids where k like 'ei_S_';
@@ -238,7 +241,7 @@ const catalog = (dbx) => dbx.admin(`select json_build_object(
 // ---------------------------------------------------------------- setup
 
 let W; // main database (0001–0015)
-let B; // baseline database (0001–0014)
+let B; // baseline database (every migration except 0015)
 let baseCatalog;
 let baseRun;
 
@@ -247,7 +250,7 @@ before(async () => {
     const r = await db.run(`drop database if exists ${name} with (force);\ncreate database ${name};`);
     if (r.code) throw new Error(r.stderr);
   }
-  for (const file of [path.join(here, "fixtures/bootstrap.sql"), ...migrationFiles(/^00(0\d|1[0-4])_.*\.sql$/), path.join(here, "fixtures/seed.sql")]) await runFile(base, file);
+  for (const file of [path.join(here, "fixtures/bootstrap.sql"), ...migrationsWithout0015(), path.join(here, "fixtures/seed.sql")]) await runFile(base, file);
   baseCatalog = await catalog(base);
   W = await world(db);
   B = await world(base);
@@ -693,9 +696,9 @@ test("A5. attempts that existed before 0015 keep started_session_id NULL and kee
 });
 
 test("D2. exact 0009 proof: re-created functions minus lines tagged '-- 0015' equal the 0009 source; every other function is untouched", async () => {
-  // Function bodies as last defined by 0001–0014.
+  // Function bodies as last defined by every migration except 0015 (later ones, e.g. 0016, re-create some).
   const defined = new Map();
-  for (const file of migrationFiles(/^00(0\d|1[0-4])_.*\.sql$/)) {
+  for (const file of migrationsWithout0015()) {
     const src = read(file);
     const re = /create\s+(?:or\s+replace\s+)?function\s+public\.(\w+)\s*\(/gi;
     let m;

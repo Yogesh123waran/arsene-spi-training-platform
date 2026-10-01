@@ -54,6 +54,13 @@ insert into t.ids (k, v) select k, gen_random_uuid() from unnest(array['A','A2',
 insert into auth.users (id) select v from t.ids where k in ('A','A2','T1','T2','T3','ST1');
 update public.profiles set role = 'super_admin' where id in (t.id('A'), t.id('A2'));
 update public.profiles set role = 'trainer' where id in (t.id('T1'), t.id('T2'), t.id('T3'));
+-- 0016: new auth users start invited (no usable role). The test people are
+-- activated here, as accepting an invitation will do (skipped before 0016).
+do $act$ begin
+  if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name = 'account_status') then
+    execute $u$update public.profiles set account_status = 'active' where id in (select v from t.ids where k in ('A','A2','T1','T2','T3','ST1'))$u$;
+  end if;
+end $act$;
 insert into public.trainers (id, trainer_code, full_name) values (t.id('T1'), 'T1', 'Trainer One'), (t.id('T2'), 'T2', 'Trainer Two'), (t.id('T3'), 'T3', 'Trainer Three');
 insert into public.students (id, student_code, full_name) values (t.id('ST1'), 'ST1', 'Student One');
 insert into public.courses (id, course_code, title, level) values

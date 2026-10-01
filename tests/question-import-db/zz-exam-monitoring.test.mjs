@@ -1,5 +1,5 @@
 // Integration (Anti-Malpractice Step 4): staff exam monitoring — the real repository/service
-// cores against the local 0001–0015 database, each viewer on their own session (RLS).
+// cores against the local 0001–0016 database, each viewer on their own session (RLS).
 // Super Admin sees everything; a trainer only the batches they currently teach; students and
 // signed-out users are refused, and RLS gives them no rows even when the repository is called directly.
 import { before, test } from "node:test";
@@ -41,6 +41,7 @@ before(async () => {
   await db.exec(`
     insert into t.ids (k, v) select 'em_' || k, gen_random_uuid() from unnest(array['EM1','EM2','EM3','CL1','CL2','X1','X2']) k;
     insert into auth.users (id) select v from t.ids where k in ('em_EM1','em_EM2','em_EM3');
+    update public.profiles set account_status = 'active' where id in (select v from t.ids where k in ('em_EM1','em_EM2','em_EM3'));
     insert into public.students (id, student_code, full_name) values
       (t.id('em_EM1'), 'EM1', 'Monitor Student One'), (t.id('em_EM2'), 'EM2', 'Monitor Student Two'), (t.id('em_EM3'), 'EM3', 'Monitor Student Three');
     insert into public.batch_students (batch_id, student_id) values
