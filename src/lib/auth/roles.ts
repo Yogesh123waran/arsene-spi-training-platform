@@ -20,6 +20,20 @@ export function getHomeRouteForRole(role: UserRole): string {
   return ROLE_HOME_ROUTE[role];
 }
 
+/**
+ * Portal access for a resolved role (the middleware's decision):
+ * no usable role (signed out, no profile, invited, suspended, unknown
+ * role) → "login"; another portal's role → "unauthorized"; else "allow".
+ * The role must come from fetchProfileRole / the demo session — never
+ * from the request.
+ */
+export type PortalDecision = "allow" | "login" | "unauthorized";
+
+export function decidePortalAccess(requiredPortal: UserRole, role: UserRole | null | undefined): PortalDecision {
+  if (!role) return "login";
+  return role === requiredPortal ? "allow" : "unauthorized";
+}
+
 /** Which portal (route prefix) a given pathname belongs to, if any. */
 export function getPortalForPath(pathname: string): UserRole | null {
   if (pathname === "/admin" || pathname.startsWith("/admin/")) return "admin";

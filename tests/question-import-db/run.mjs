@@ -75,6 +75,7 @@ try {
     "src/services/exam-monitoring.service.core.ts",
     // Sign-in / session role lookup (0016 account status)
     "src/lib/auth/profile-role.ts",
+    "src/lib/auth/roles.ts",
   ];
   for (const rel of sources) {
     const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {

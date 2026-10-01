@@ -4,7 +4,7 @@ import type { User as SupabaseUser } from "@supabase/supabase-js";
 import { authConfig, DEMO_ACCOUNTS, DEMO_PASSWORD } from "@/config/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { encodeDemoSession, decodeDemoSession } from "@/lib/auth/session";
-import { fetchProfileRole } from "@/lib/auth/profile-role";
+import { fetchProfileRole, NO_ACCESS_MESSAGE } from "@/lib/auth/profile-role";
 import type { AuthResult, AuthSession, AuthUser } from "@/types/auth";
 import type { UserRole } from "@/types/user";
 
@@ -129,7 +129,8 @@ async function loginSupabase(email: string, password: string): Promise<AuthResul
     const role = await fetchProfileRole(supabase, data.user.id);
     if (!role) {
       await supabase.auth.signOut();
-      return { success: false, error: "Your account isn't set up for access yet. Contact your administrator." };
+      // Same message for no profile, invited, suspended or unknown role — never reveals which.
+      return { success: false, error: NO_ACCESS_MESSAGE };
     }
 
     return { success: true, user: mapSupabaseUser(data.user, role) };

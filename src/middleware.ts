@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { authConfig } from "@/config/auth";
 import { decodeDemoSession } from "@/lib/auth/session";
 import { updateSupabaseSession, type SupabaseSessionResult } from "@/lib/supabase/middleware";
-import { getPortalForPath } from "@/lib/auth/roles";
+import { decidePortalAccess, getPortalForPath } from "@/lib/auth/roles";
 import type { UserRole } from "@/types/user";
 
 /**
@@ -41,18 +41,20 @@ export async function middleware(request: NextRequest) {
     role = payload?.role ?? null;
   } else {
     // Production: role from public.profiles only (see
-    // lib/auth/profile-role.ts). A signed-in user with no profile or
-    // an unrecognised role gets null here and is treated as signed out.
+    // lib/auth/profile-role.ts). A signed-in user with no profile, an
+    // inactive (invited/suspended) account or an unrecognised role gets
+    // null here and is treated as signed out.
     role = supabaseResult.role;
   }
 
-  if (!role) {
+  const decision = decidePortalAccess(requiredPortal, role);
+  if (decision === "login") {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
-  if (role !== requiredPortal) {
+  if (decision === "unauthorized") {
     return NextResponse.redirect(new URL("/unauthorized", request.url));
   }
 

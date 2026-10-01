@@ -82,6 +82,9 @@ export type ClassesUpdate = Partial<ClassesInsert>;
 /** Mirrors the public.app_role enum (0002_profiles_roles.sql). */
 export type AppRoleColumn = "super_admin" | "trainer" | "student";
 
+/** Account access lifecycle (0016_user_lifecycle.sql). Only "active" has a usable role. */
+export type AccountStatusColumn = "invited" | "active" | "suspended";
+
 /**
  * Columns of public.profiles exactly as stored. `role` is the ONLY
  * production source of an application role — see
@@ -92,6 +95,10 @@ export type ProfilesRow = {
   role: AppRoleColumn;
   created_at: string;
   updated_at: string;
+  /** 0016 — the role applies only while this is "active". */
+  account_status: AccountStatusColumn;
+  account_status_changed_at: string;
+  account_status_changed_by: string | null;
 };
 
 /**
@@ -104,6 +111,7 @@ export type ProfilesInsert = {
   role?: AppRoleColumn;
   created_at?: string;
   updated_at?: string;
+  account_status?: AccountStatusColumn;
 };
 
 export type ProfilesUpdate = Partial<ProfilesInsert>;
