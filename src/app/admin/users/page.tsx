@@ -1,0 +1,52 @@
+import { CircleSlash, MailQuestion, UserCheck, UserX } from "lucide-react";
+import { PageHeader } from "@/components/layout/PageHeader";
+import { SummaryStat } from "@/components/dashboard/SummaryStat";
+import { ErrorState } from "@/components/ui/ErrorState";
+import { UsersTable } from "@/components/modules/UsersTable";
+import { usersService, UsersAuthorizationError } from "@/services/users.service";
+import type { UserListPage } from "@/types/user-management";
+
+export const dynamic = "force-dynamic";
+
+const BASE_PATH = "/admin/users";
+
+/**
+ * Users (admin, read-only). The layout's RoleGuard admits only Super
+ * Admins; usersService re-checks the signed-in user server-side and RLS
+ * decides every row. Filters come from the URL and are validated there;
+ * only the requested page is sent to the browser.
+ */
+export default async function AdminUsersPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
+  let data: UserListPage | null = null;
+  let loadError: string | null = null;
+
+  try {
+    data = await usersService.listUsers(searchParams);
+  } catch (err) {
+    if (err instanceof UsersAuthorizationError) {
+      loadError = err.message;
+    } else {
+      console.error("[admin/users] load failed:", err instanceof Error ? err.message : err);
+      loadError = "We couldn't load the users. Please try again.";
+    }
+  }
+
+  return (
+    <div>
+      <PageHeader title="Users" description="Every account on the platform: role, account status, domain record and batches. Read-only." />
+      {loadError || !data ? (
+        <ErrorState title="We couldn't load the users" description={loadError ?? "Please try again."} />
+      ) : (
+        <div className="flex flex-col gap-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <SummaryStat label="Active accounts" value={String(data.totals.byStatus.active)} icon={UserCheck} tone="green" />
+            <SummaryStat label="Invited (not yet active)" value={String(data.totals.byStatus.invited)} icon={MailQuestion} tone="gold" />
+            <SummaryStat label="Suspended" value={String(data.totals.byStatus.suspended)} icon={UserX} tone="red" />
+            <SummaryStat label="Missing domain record" value={String(data.totals.missingRecord)} icon={CircleSlash} tone="blue" />
+          </div>
+          <UsersTable data={data} basePath={BASE_PATH} />
+        </div>
+      )}
+    </div>
+  );
+}

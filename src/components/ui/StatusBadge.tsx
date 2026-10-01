@@ -25,6 +25,7 @@ const STATUS_TONE: Record<string, BadgeProps["tone"]> = {
   fail: "red",
   expired: "red",
   revoked: "red",
+  suspended: "red",
 };
 
 function toLabel(status: string): string {

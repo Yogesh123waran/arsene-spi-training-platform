@@ -15,6 +15,7 @@ import {
   Bell,
   Settings,
   ShieldCheck,
+  UserCog,
 } from "lucide-react";
 
 export type PortalRole = "admin" | "trainer" | "student";
@@ -34,6 +35,7 @@ export const navigationByRole: Record<PortalRole, NavItem[]> = {
   admin: [
     { label: "Dashboard", href: "/admin", icon: LayoutDashboard },
     { label: "Courses", href: "/admin/courses", icon: BookOpen },
+    { label: "Users", href: "/admin/users", icon: UserCog },
     { label: "Trainers", href: "/admin/trainers", icon: Users },
     { label: "Students", href: "/admin/students", icon: GraduationCap },
     { label: "Batches", href: "/admin/batches", icon: Layers },

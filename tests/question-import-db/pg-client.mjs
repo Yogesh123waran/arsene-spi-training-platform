@@ -4,6 +4,11 @@
 // grants and the 0013 functions behave as they do behind PostgREST.
 // Supports exactly what question-import.repository.core.ts uses:
 //   rpc(fn, args) · from(table).select(cols) · eq · in · gt · gte · lte · order · limit · maybeSingle
+// plus PostgREST resource embedding in select (users.repository.core.ts):
+//   "id, students!students_id_fkey ( code, student_details ( email ) )"
+// resolved from the real foreign keys like PostgREST does (to-one → object or
+// null, to-many → array); each embedded table is read under the same role, so
+// RLS applies to it exactly as behind PostgREST.
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -33,6 +38,82 @@ const ident = (name) => {
   if (!/^[a-z_][a-z0-9_]*$/.test(name)) throw new Error(`bad identifier ${name}`);
   return name;
 };
+
+// --- PostgREST resource embedding -------------------------------------------
+/** "a, b!fk ( c, d ( e ) )" → [{ name, hint, children }]. */
+function parseSelect(text) {
+  let i = 0;
+  const skip = () => {
+    while (i < text.length && /\s/.test(text[i])) i++;
+  };
+  function list(nested) {
+    const items = [];
+    for (;;) {
+      skip();
+      const m = /^([a-z_][a-z0-9_]*)(?:!([a-z_][a-z0-9_]*))?/.exec(text.slice(i));
+      if (!m) throw new Error(`bad select near "${text.slice(i, i + 20)}"`);
+      i += m[0].length;
+      skip();
+      let children = null;
+      if (text[i] === "(") {
+        i++;
+        children = list(true);
+      }
+      items.push({ name: ident(m[1]), hint: m[2] ?? null, children });
+      skip();
+      if (text[i] === ",") {
+        i++;
+        continue;
+      }
+      if (nested && text[i] === ")") {
+        i++;
+        return items;
+      }
+      if (!nested && i >= text.length) return items;
+      throw new Error(`bad select near "${text.slice(i, i + 20)}"`);
+    }
+  }
+  return list(false);
+}
+
+/** Foreign keys between public tables: { name, child, childCols, parent, parentCols, unique (child cols are a PK/unique key) }. */
+const FK_QUERY = `select coalesce(jsonb_agg(jsonb_build_object(
+    'name', c.conname, 'child', cr.relname, 'parent', pr.relname,
+    'childCols', (select jsonb_agg(a.attname order by k.ord) from unnest(c.conkey) with ordinality k(n, ord) join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k.n),
+    'parentCols', (select jsonb_agg(a.attname order by k.ord) from unnest(c.confkey) with ordinality k(n, ord) join pg_attribute a on a.attrelid = c.confrelid and a.attnum = k.n),
+    'unique', exists (select 1 from pg_constraint u where u.conrelid = c.conrelid and u.contype in ('p', 'u')
+                        and (select array_agg(x order by x) from unnest(u.conkey) x) = (select array_agg(x order by x) from unnest(c.conkey) x)))), '[]'::jsonb)
+  from pg_constraint c
+  join pg_class cr on cr.oid = c.conrelid join pg_namespace cn on cn.oid = cr.relnamespace
+  join pg_class pr on pr.oid = c.confrelid join pg_namespace pn on pn.oid = pr.relnamespace
+ where c.contype = 'f' and cn.nspname = 'public' and pn.nspname = 'public'`;
+
+function renderEmbedded(table, alias, items, fks, next) {
+  const parts = items.map((it) => {
+    if (!it.children) {
+      if (it.hint) throw new Error(`hint on plain column ${it.name}`);
+      return `'${it.name}', ${alias}.${it.name}`;
+    }
+    const candidates = fks.filter(
+      (f) => (!it.hint || f.name === it.hint) && ((f.child === it.name && f.parent === table) || (f.child === table && f.parent === it.name))
+    );
+    // PostgREST refuses missing (PGRST200) and ambiguous (PGRST201) relationships the same way.
+    if (candidates.length !== 1) throw new Error(`embed ${table} -> ${it.name}: ${candidates.length} relationships found`);
+    const f = candidates[0];
+    const ea = `e${next()}`;
+    const body = renderEmbedded(it.name, ea, it.children, fks, next);
+    const childSide = f.child === it.name; // the embedded table holds the foreign key
+    const cond = f.childCols
+      .map((col, k) => (childSide ? `${ea}.${col} = ${alias}.${f.parentCols[k]}` : `${ea}.${f.parentCols[k]} = ${alias}.${col}`))
+      .join(" and ");
+    const sub =
+      !childSide || f.unique
+        ? `(select ${body} from public.${it.name} ${ea} where ${cond} limit 1)`
+        : `coalesce((select jsonb_agg(${body}) from public.${it.name} ${ea} where ${cond}), '[]'::jsonb)`;
+    return `'${it.name}', ${sub}`;
+  });
+  return `jsonb_build_object(${parts.join(", ")})`;
+}
 
 export class PgDatabase {
   constructor({ psql, host = "localhost", port, user = "postgres", database }) {
@@ -70,6 +151,11 @@ export class PgDatabase {
   }
   client(identity) {
     return new PgClient(this, identity);
+  }
+  /** Foreign keys of the public schema (cached; read as the superuser, like PostgREST's schema cache). */
+  async foreignKeys() {
+    this.fkCache ??= await this.admin(FK_QUERY);
+    return this.fkCache;
   }
 }
 
@@ -121,11 +207,16 @@ class Builder {
   limit(n) { this.limitN = n; return this; }
   maybeSingle() { this.single = true; return this; }
 
-  toSql() {
+  toSql(fks = null) {
     const where = this.filters.length ? ` where ${this.filters.join(" and ")}` : "";
     const order = this.orderBy ? ` order by ${this.orderBy}` : "";
     const limit = this.limitN !== null ? ` limit ${Number(this.limitN)}` : "";
     const { spec } = this;
+    if (spec.kind === "select" && fks) {
+      let n = 0;
+      const row = renderEmbedded(spec.table, "t0", parseSelect(spec.cols), fks, () => ++n);
+      return `select coalesce(jsonb_agg(t.x), '[]'::jsonb)::text from (select ${row} as x from public.${spec.table} t0${where}${order}${limit}) t`;
+    }
     if (spec.kind === "rpc") {
       const args = Object.entries(spec.args).map(([k, v]) => `${ident(k)} => ${lit(v)}`).join(", ");
       const call = `public.${spec.fn}(${args})`;
@@ -136,7 +227,8 @@ class Builder {
     return `select coalesce(jsonb_agg(t), '[]'::jsonb)::text from (select ${cols} from public.${spec.table}${where}${order}${limit}) t`;
   }
   async execute() {
-    const result = await this.client.execute(this.toSql());
+    const embeds = this.spec.kind === "select" && this.spec.cols.includes("(");
+    const result = await this.client.execute(this.toSql(embeds ? await this.client.db.foreignKeys() : null));
     if (result.error || !this.single) return result;
     return { data: Array.isArray(result.data) ? result.data[0] ?? null : result.data, error: null };
   }

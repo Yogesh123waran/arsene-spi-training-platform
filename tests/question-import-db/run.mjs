@@ -76,6 +76,11 @@ try {
     // Sign-in / session role lookup (0016 account status)
     "src/lib/auth/profile-role.ts",
     "src/lib/auth/roles.ts",
+    // Users view (Phase 7 P3.2)
+    "src/types/user-management.ts",
+    "src/lib/user-management/users.ts",
+    "src/repositories/users.repository.core.ts",
+    "src/services/users.service.core.ts",
   ];
   for (const rel of sources) {
     const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {
