@@ -160,7 +160,7 @@ export class PgDatabase {
 }
 
 export class PgClient {
-  /** identity: { role: "authenticated" | "anon", userId?: string, sessionId?: string (the JWT "session_id" claim) } */
+  /** identity: { role: "authenticated" | "anon" | "service_role", userId?: string, sessionId?: string (the JWT "session_id" claim) } */
   constructor(db, identity) {
     this.db = db;
     this.identity = identity;
@@ -178,7 +178,8 @@ export class PgClient {
   async execute(query) {
     const { role, userId, sessionId } = this.identity;
     const claims = userId ? JSON.stringify(sessionId ? { sub: userId, session_id: sessionId } : { sub: userId }) : "";
-    const sql = `set role ${role === "anon" ? "anon" : "authenticated"};\nselect set_config('request.jwt.claims', ${quote(claims)}, false);\n${query};\n`;
+    const dbRole = role === "anon" || role === "service_role" ? role : "authenticated";
+    const sql = `set role ${dbRole};\nselect set_config('request.jwt.claims', ${quote(claims)}, false);\n${query};\n`;
     const { stdout, stderr, code } = await this.db.run(sql);
     if (code) {
       const m = /ERROR:\s+([0-9A-Z]{5}):\s+(.*)/.exec(stderr);
