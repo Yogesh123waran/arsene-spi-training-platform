@@ -354,12 +354,13 @@ test("source: no Users file imports the service-role client, reads auth.users or
     assert.doesNotMatch(code, /SUPABASE_SERVICE_ROLE_KEY|service_role/, rel);
     assert.doesNotMatch(code, /auth\.admin|\.schema\(\s*["']auth["']|from\(\s*["']users["']/, rel);
   }
-  // The admin client still has no importers anywhere in src.
+  // The admin client has exactly one importer in src: the P3.4 Auth Admin repository.
   const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walk(path.join(dir, d.name)) : [path.join(dir, d.name)]));
   const importers = walk(path.join(root, "src"))
     .filter((f) => /\.(ts|tsx)$/.test(f) && !f.endsWith(path.join("supabase", "admin.ts")))
-    .filter((f) => /lib\/supabase\/admin/.test(fs.readFileSync(f, "utf8")));
-  assert.deepEqual(importers, []);
+    .filter((f) => /from\s+["'][^"']*lib\/supabase\/admin["']/.test(fs.readFileSync(f, "utf8")))
+    .map((f) => path.relative(root, f).split(path.sep).join("/"));
+  assert.deepEqual(importers, ["src/repositories/auth-admin.repository.ts"]);
 });
 
 test("source: no direct table writes; changes only through the approved 0017 functions; the list stays action-free", () => {

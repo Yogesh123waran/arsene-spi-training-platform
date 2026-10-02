@@ -21,6 +21,11 @@ const sources = [
   "src/lib/user-management/lifecycle.ts",
   "src/repositories/users.repository.core.ts",
   "src/services/users.service.core.ts",
+  // P3.4 invitation sending
+  "src/lib/user-management/invitations.ts",
+  "src/repositories/invitations.repository.core.ts",
+  "src/repositories/auth-admin.repository.core.ts",
+  "src/services/invitations.service.core.ts",
 ];
 for (const rel of sources) {
   const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {

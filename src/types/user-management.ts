@@ -163,3 +163,47 @@ export interface UserDetail {
 
 /** Plain, serializable result of a lifecycle server action. */
 export type UserActionResult = { ok: true; message: string } | { ok: false; error: string };
+
+// -------------------------------------------------------------------
+// Invitation sending (Phase 7 P3.4)
+// -------------------------------------------------------------------
+
+/** Why Supabase Auth refused to send an invitation email (classified; raw errors stay on the server). */
+export type AuthInviteFailure = "already_registered" | "rate_limited" | "address_not_allowed" | "invalid_address" | "auth_error";
+
+/**
+ * Why the database refused to create an invitation: the reasons the
+ * invitation-creation function returns, plus the raised-error mappings
+ * (42501 → permission, 22023/22P02/23514 → invalid, 23505 → already_invited).
+ */
+export type InvitationCreateRefusal =
+  | "account_exists"
+  | "already_invited"
+  | "code_in_use"
+  | "batch_not_current"
+  | "rate_limited"
+  | "email_unavailable"
+  | "permission"
+  | "invalid";
+
+/** Why the database refused a delivery attempt: the delivery-authorization function's reasons plus the raised-error mappings. */
+export type InvitationDeliverRefusal = "not_found" | "expired" | "not_pending" | "cooldown" | "resend_limit" | "permission" | "invalid";
+
+/**
+ * Result of creating and/or sending an invitation. Each kind maps to a
+ * distinct, safe message (see invitationOutcomeMessage):
+ *   sent             — Auth sent the email and the database recorded it
+ *   refused          — the database said no (create or delivery); nothing was sent
+ *   delivery_failed  — Auth refused to send; recorded as failed when possible
+ *   delivery_unknown — the Auth call gave no answer; it may or may not have been sent
+ *   sent_unrecorded  — Auth sent the email but recording the outcome failed
+ *   unavailable      — sending isn't configured on this server; nothing was attempted
+ */
+export type InvitationSendOutcome =
+  | { kind: "sent"; invitationId: string; attempt: "initial" | "resend" }
+  | { kind: "refused"; stage: "create"; reason: InvitationCreateRefusal; invitationId: null }
+  | { kind: "refused"; stage: "deliver"; reason: InvitationDeliverRefusal; invitationId: string | null; retryAfterSeconds?: number }
+  | { kind: "delivery_failed"; invitationId: string; reason: AuthInviteFailure; recorded: boolean }
+  | { kind: "delivery_unknown"; invitationId: string }
+  | { kind: "sent_unrecorded"; invitationId: string }
+  | { kind: "unavailable"; invitationId: string | null; reason: "not_configured" };

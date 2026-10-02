@@ -1689,6 +1689,21 @@ export type Database = {
         Args: { p_trainer_id: string; p: Json };
         Returns: Json;
       };
+      /** 0017 (address rule widened by 0019 D1). Returns { ok, invitation_id? , reason? }. */
+      create_user_invitation: {
+        Args: { p: Json };
+        Returns: Json;
+      };
+      /** 0019, caller's session: authorize one delivery attempt. Returns { ok, email?, expires_at?, attempt?, resend_count?, reason?, retry_after_seconds? }. */
+      begin_invitation_delivery: {
+        Args: { p_invitation_id: string };
+        Returns: Json;
+      };
+      /** 0019, service_role ONLY: record the outcome of an authorized attempt. Returns { ok, delivery_status?, reason? }. */
+      record_invitation_delivery: {
+        Args: { p_invitation_id: string; p_sent: boolean; p_auth_user_id?: string | null };
+        Returns: Json;
+      };
     };
     Enums: {
       app_role: AppRoleColumn;
