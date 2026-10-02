@@ -77,6 +77,8 @@ export const AUDIT_HISTORY_LIMIT = 25;
 export interface UsersFunctionOutcome {
   ok: boolean;
   reason: string | null;
+  /** A generated student/trainer code — present only when the function created a record (0020). */
+  code?: string;
 }
 
 function logDbError(context: string, error: unknown) {
@@ -133,7 +135,7 @@ export function createUsersRepository(getClient: () => Promise<Client | null>, o
       logDbError(context, "unexpected function result");
       throw new UsersRepositoryError("The change could not be made.");
     }
-    return { ok: data.ok, reason: typeof data.reason === "string" ? data.reason : null };
+    return { ok: data.ok, reason: typeof data.reason === "string" ? data.reason : null, ...(typeof data.code === "string" ? { code: data.code } : {}) };
   }
 
   return {

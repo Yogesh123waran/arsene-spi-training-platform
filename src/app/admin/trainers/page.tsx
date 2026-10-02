@@ -1,7 +1,6 @@
-import { UserPlus } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
-import { Button } from "@/components/ui/Button";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { InviteUserButton } from "@/components/modules/InviteUserButton";
 import { trainersService } from "@/services/trainers.service";
 import type { TrainerSummary } from "@/types/trainer";
 import { TrainersTable } from "./TrainersTable";
@@ -24,11 +23,7 @@ export default async function AdminTrainersPage() {
       <PageHeader
         title="Trainers"
         description="Manage trainer profiles, specializations and assignments."
-        actions={
-          <Button size="sm">
-            <UserPlus className="h-4 w-4" /> Add Trainer
-          </Button>
-        }
+        actions={<InviteUserButton kind="trainer" />}
       />
       {loadError ? (
         <ErrorState title="We couldn't load the trainers" description={loadError} />

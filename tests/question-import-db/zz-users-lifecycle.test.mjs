@@ -111,7 +111,7 @@ test("invited accounts: neither activated nor suspended by an administrator — 
   assert.deepEqual(await direct.setAccountStatus(W.lc_INV, "suspended", null), { ok: false, reason: "transition_not_allowed" });
   assert.deepEqual(await direct.setAccountStatus(W.lc_INV, "active", null), { ok: false, reason: "transition_not_allowed" });
   assert.equal((await state(W.lc_INV)).account, "invited");
-  await rejectsWith(svc.changeRole(W.lc_INV, "trainer", { code: "LC-INV", fullName: "Lc Invited" }), L.ROLE_REASON_MESSAGE.account_not_active);
+  await rejectsWith(svc.changeRole(W.lc_INV, "trainer", { fullName: "Lc Invited" }), L.ROLE_REASON_MESSAGE.account_not_active);
   assert.deepEqual(await events(W.lc_INV), [], "refusals write no audit rows");
   const detail = await svc.getUserDetail(W.lc_INV);
   assert.deepEqual([detail.user.recordState, detail.actions.suspend, detail.actions.reactivate, detail.actions.changeRole], ["missing", false, false, false]);
@@ -120,7 +120,7 @@ test("invited accounts: neither activated nor suspended by an administrator — 
 test("self-protection: a Super Admin cannot suspend or demote their own account", async () => {
   const svc = as(W.lc_SA);
   await rejectsWith(svc.setAccountStatus(W.lc_SA, "suspended", null), L.STATUS_REASON_MESSAGE.cannot_change_self);
-  await rejectsWith(svc.changeRole(W.lc_SA, "student", { code: "LC-SELF", fullName: "Me" }), L.ROLE_REASON_MESSAGE.cannot_change_self);
+  await rejectsWith(svc.changeRole(W.lc_SA, "student", { fullName: "Me" }), L.ROLE_REASON_MESSAGE.cannot_change_self);
   assert.deepEqual(await state(W.lc_SA), { role: "super_admin", account: "active", student: null, trainer: null });
   assert.deepEqual(await events(W.lc_SA), []);
   const detail = await svc.getUserDetail(W.lc_SA);
@@ -132,12 +132,15 @@ test("role change: Student → Trainer creates the trainer record and keeps the 
   await rejectsWith(svc.changeRole(W.lc_S1, "trainer", null), "A full name is needed to create the trainer record.");
   assert.equal((await state(W.lc_S1)).role, "student", "refused before the database call");
 
-  assert.equal(await svc.changeRole(W.lc_S1, "trainer", { code: "LC-T1", fullName: "Lc Student One" }), "Role changed to Trainer.");
+  const changed = await svc.changeRole(W.lc_S1, "trainer", { code: "FORGED", fullName: "Lc Student One" });
+  assert.match(changed, /^Role changed to Trainer\. Trainer code: TRN-\d{5,}\.$/, "the generated code is reported");
+  const generated = await db.admin(`select trainer_code from public.trainers where id = '${W.lc_S1}'`);
+  assert.equal(changed, `Role changed to Trainer. Trainer code: ${generated}.`, "a browser-supplied code is never used (0020)");
   assert.deepEqual(await state(W.lc_S1), { role: "trainer", account: "active", student: "inactive", trainer: "active" });
   assert.equal(await db.admin(`select email from public.trainer_details where trainer_id = '${W.lc_S1}'`), "lc_s1@lc.test", "email from the account, not the browser");
   assert.equal(await quiet(() => fetchProfileRole(db.client({ role: "authenticated", userId: W.lc_S1 }), W.lc_S1)), "trainer");
 
-  assert.equal(await svc.changeRole(W.lc_S1, "student", { code: "IGNORED", fullName: "Ignored" }), "Role changed to Student.");
+  assert.equal(await svc.changeRole(W.lc_S1, "student", { fullName: "Ignored" }), "Role changed to Student.");
   assert.deepEqual(await state(W.lc_S1), { role: "student", account: "active", student: "active", trainer: "inactive" });
   assert.equal(await db.admin(`select student_code from public.students where id = '${W.lc_S1}'`), "LC-S1", "the original record, reactivated");
   assert.equal(await db.admin(`select count(*) from public.trainers where id = '${W.lc_S1}'`), 1, "the trainer record is kept, not deleted");
@@ -153,10 +156,8 @@ test("role change is refused while the old role has live responsibilities, with 
   const svc = as(W.lc_SA);
   await rejectsWith(svc.changeRole(W.lc_S2, "admin", null), L.ROLE_REASON_MESSAGE.has_active_enrollments);
   assert.deepEqual(await state(W.lc_S2), { role: "student", account: "active", student: "active", trainer: null });
-  await rejectsWith(svc.changeRole(W.T1, "student", { code: "LC-T1S", fullName: "T One" }), L.ROLE_REASON_MESSAGE.has_current_batches);
+  await rejectsWith(svc.changeRole(W.T1, "student", { fullName: "T One" }), L.ROLE_REASON_MESSAGE.has_current_batches);
   assert.equal((await state(W.T1)).role, "trainer");
-  // A new record's code must be free (LC-T belongs to lc_T).
-  await rejectsWith(svc.changeRole(W.lc_SA2, "trainer", { code: "LC-T", fullName: "Dup" }), L.ROLE_REASON_MESSAGE.code_in_use);
   assert.deepEqual(await state(W.lc_SA2), { role: "super_admin", account: "active", student: null, trainer: null });
   assert.deepEqual(await events(W.lc_S2), []);
   assert.deepEqual(await events(W.lc_SA2), []);
@@ -164,7 +165,7 @@ test("role change is refused while the old role has live responsibilities, with 
 
 test("another Super Admin can be demoted while one stays active (record created, audited)", async () => {
   const svc = as(W.lc_SA);
-  assert.equal(await svc.changeRole(W.lc_SA2, "student", { code: "LC-SA2", fullName: "Former Admin" }), "Role changed to Student.");
+  assert.match(await svc.changeRole(W.lc_SA2, "student", { fullName: "Former Admin" }), /^Role changed to Student\. Student code: STU-\d{5,}\.$/);
   assert.deepEqual(await state(W.lc_SA2), { role: "student", account: "active", student: "active", trainer: null });
   assert.ok((await db.admin("select count(*) from public.profiles where role = 'super_admin' and account_status = 'active'")) >= 1);
 });
@@ -193,7 +194,7 @@ test("trainers, students and signed-out callers are refused; the database refuse
   for (const id of [W.T1, W.ST1, null]) {
     const svc = as(id);
     await assert.rejects(svc.setAccountStatus(W.lc_S2, "suspended", null), UsersAuthorizationError);
-    await assert.rejects(svc.changeRole(W.lc_S2, "trainer", { code: "X1", fullName: "X" }), UsersAuthorizationError);
+    await assert.rejects(svc.changeRole(W.lc_S2, "trainer", { fullName: "X" }), UsersAuthorizationError);
     await assert.rejects(svc.updateDetails(W.lc_S2, { fullName: "Hacked" }), UsersAuthorizationError);
   }
   for (const id of [W.T1, W.ST1]) {
@@ -255,7 +256,7 @@ test("last active Super Admin: a concurrent mutual suspension leaves exactly one
   // The survivor cannot remove their own access; the suspended admin cannot act at all.
   const a = serviceAs(race, P.A);
   await rejectsWith(a.setAccountStatus(P.A, "suspended", null), L.STATUS_REASON_MESSAGE.cannot_change_self);
-  await rejectsWith(a.changeRole(P.A, "student", { code: "LAST", fullName: "Last" }), L.ROLE_REASON_MESSAGE.cannot_change_self);
+  await rejectsWith(a.changeRole(P.A, "student", { fullName: "Last" }), L.ROLE_REASON_MESSAGE.cannot_change_self);
   await assert.rejects(serviceAs(race, P.A2).setAccountStatus(P.A, "suspended", null), UsersAuthorizationError);
   assert.equal(await activeAdmins(), 1);
 });

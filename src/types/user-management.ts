@@ -179,7 +179,6 @@ export type AuthInviteFailure = "already_registered" | "rate_limited" | "address
 export type InvitationCreateRefusal =
   | "account_exists"
   | "already_invited"
-  | "code_in_use"
   | "batch_not_current"
   | "rate_limited"
   | "email_unavailable"
@@ -200,10 +199,33 @@ export type InvitationDeliverRefusal = "not_found" | "expired" | "not_pending" |
  *   unavailable      — sending isn't configured on this server; nothing was attempted
  */
 export type InvitationSendOutcome =
-  | { kind: "sent"; invitationId: string; attempt: "initial" | "resend" }
+  | { kind: "sent"; invitationId: string; attempt: "initial" | "resend"; code?: string }
   | { kind: "refused"; stage: "create"; reason: InvitationCreateRefusal; invitationId: null }
   | { kind: "refused"; stage: "deliver"; reason: InvitationDeliverRefusal; invitationId: string | null; retryAfterSeconds?: number }
-  | { kind: "delivery_failed"; invitationId: string; reason: AuthInviteFailure; recorded: boolean }
-  | { kind: "delivery_unknown"; invitationId: string }
-  | { kind: "sent_unrecorded"; invitationId: string }
+  | { kind: "delivery_failed"; invitationId: string; reason: AuthInviteFailure; recorded: boolean; code?: string }
+  | { kind: "delivery_unknown"; invitationId: string; code?: string }
+  | { kind: "sent_unrecorded"; invitationId: string; code?: string }
   | { kind: "unavailable"; invitationId: string | null; reason: "not_configured" };
+
+/** What the Add Student dialog may send. The role is fixed to student on the server. */
+export interface StudentInvitationInput {
+  email?: string;
+  fullName?: string;
+  phone?: string;
+  organization?: string;
+  designation?: string;
+  batchId?: string;
+}
+
+/** What the Add Trainer dialog may send. The role is fixed to trainer on the server. */
+export interface TrainerInvitationInput {
+  email?: string;
+  fullName?: string;
+  phone?: string;
+  specializations?: string[];
+}
+
+/** Plain, serializable result of an invitation server action (never raw errors). */
+export type InvitationActionResult =
+  | { status: "outcome"; outcome: InvitationSendOutcome; message: string }
+  | { status: "error"; error: string };

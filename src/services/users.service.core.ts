@@ -81,7 +81,7 @@ export function createUsersService(deps: UsersServiceDeps) {
   }
 
   /** Runs one 0017 function and turns its answer (or raised error) into a safe outcome. */
-  async function perform(fn: () => Promise<UsersFunctionOutcome>, reasons: Record<string, string>): Promise<void> {
+  async function perform(fn: () => Promise<UsersFunctionOutcome>, reasons: Record<string, string>): Promise<UsersFunctionOutcome> {
     let outcome: UsersFunctionOutcome;
     try {
       outcome = await fn();
@@ -90,6 +90,7 @@ export function createUsersService(deps: UsersServiceDeps) {
       throw new UsersActionError("The change could not be made. Please try again.");
     }
     if (!outcome.ok) throw new UsersActionError(reasonMessage(reasons, outcome.reason));
+    return outcome;
   }
 
   async function loadDetail(viewer: AuthUser, userId: string): Promise<UserDetail | null> {
@@ -132,11 +133,11 @@ export function createUsersService(deps: UsersServiceDeps) {
 
     /**
      * Change the role of an active account — or, with its current role,
-     * create the record that role is missing. A new record needs a code
-     * and full name; an existing (inactive) one is reactivated by the
-     * database and the old role's record is kept, marked inactive.
+     * create the record that role is missing. A new record needs a full
+     * name and gets a generated code (0020); an existing (inactive) one is
+     * reactivated by the database and the old role's record is kept, marked inactive.
      */
-    async changeRole(userId: unknown, role: unknown, recordInput: { code?: unknown; fullName?: unknown } | null | undefined): Promise<string> {
+    async changeRole(userId: unknown, role: unknown, recordInput: { fullName?: unknown } | null | undefined): Promise<string> {
       const viewer = await requireSuperAdmin("Only Super Admins can change roles.");
       requireActions();
       const id = targetId(userId);
@@ -148,9 +149,10 @@ export function createUsersService(deps: UsersServiceDeps) {
       const needsRecord = target.value === "student" ? !detail.hasStudentRecord : target.value === "trainer" ? !detail.hasTrainerRecord : false;
       const details = buildRoleDetails(target.value, needsRecord, recordInput);
       if (!details.ok) throw new UsersActionError(details.error);
-      await perform(() => deps.repository.setUserRole(id, target.value, details.value), ROLE_REASON_MESSAGE);
+      const outcome = await perform(() => deps.repository.setUserRole(id, target.value, details.value), ROLE_REASON_MESSAGE);
       const sameRole = detail.user.role === (target.value === "super_admin" ? "admin" : target.value);
-      return sameRole ? `${ROLE_SUCCESS[target.value]} record created.` : `Role changed to ${ROLE_SUCCESS[target.value]}.`;
+      const base = sameRole ? `${ROLE_SUCCESS[target.value]} record created.` : `Role changed to ${ROLE_SUCCESS[target.value]}.`;
+      return outcome.code ? `${base} ${ROLE_SUCCESS[target.value]} code: ${outcome.code}.` : base;
     },
 
     /** Name and contact details of the account's current student/trainer record (changed fields only). */

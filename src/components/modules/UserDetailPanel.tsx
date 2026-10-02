@@ -120,12 +120,10 @@ function RoleDialog({ detail, open, onClose }: { detail: UserDetail; open: boole
   const missingOwnRecord = u.recordState === "missing";
   const initial = missingOwnRecord && u.role ? u.role : (ROLES.find((r) => r !== u.role) ?? "student");
   const [role, setRole] = useState<UserRole>(initial);
-  const [code, setCode] = useState("");
   const [fullName, setFullName] = useState(u.name ?? "");
   const { isPending, run } = useLifecycleAction();
   useEffect(() => {
     setRole(initial);
-    setCode("");
     setFullName(u.name ?? "");
   }, [open, initial, u.name]);
   if (!open) return null;
@@ -145,11 +143,11 @@ function RoleDialog({ detail, open, onClose }: { detail: UserDetail; open: boole
     if (role === "admin") consequences.push("Super Admins can see and manage every account and all training data.");
   }
   if (existingTarget) consequences.push(`The existing ${existingTarget} record is reactivated (nothing new is created).`);
-  if (needsRecord) consequences.push(`A new ${role} record is created with the code and name below; the email comes from the account.`);
+  if (needsRecord) consequences.push(`A new ${role} record is created with the name below and an automatically assigned ${role} code; the email comes from the account.`);
   consequences.push("The database refuses the change if it would leave no active Super Admin, or while the old role still has current batches, enrolments or a test in progress.");
 
   const submit = () =>
-    run(() => changeUserRoleAction(u.id, role, needsRecord ? { code: code.trim(), fullName: fullName.trim() } : null), onClose);
+    run(() => changeUserRoleAction(u.id, role, needsRecord ? { fullName: fullName.trim() } : null), onClose);
 
   return (
     <Modal
@@ -163,7 +161,7 @@ function RoleDialog({ detail, open, onClose }: { detail: UserDetail; open: boole
           <Button variant="secondary" onClick={onClose} disabled={isPending}>
             Cancel
           </Button>
-          <Button variant="danger" isLoading={isPending} onClick={submit} disabled={needsRecord && (!code.trim() || !fullName.trim())}>
+          <Button variant="danger" isLoading={isPending} onClick={submit} disabled={needsRecord && !fullName.trim()}>
             {sameRole ? "Create record" : `Change role to ${ROLE_LABEL[role]}`}
           </Button>
         </>
@@ -172,10 +170,14 @@ function RoleDialog({ detail, open, onClose }: { detail: UserDetail; open: boole
       <div className="flex flex-col gap-4">
         <Select name="role" label="New role" value={role} onChange={(e) => setRole(e.target.value as UserRole)} options={options} />
         {needsRecord && (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Input name="code" label={role === "student" ? "Student code" : "Trainer code"} value={code} onChange={(e) => setCode(e.target.value)} maxLength={40} hint="Letters, digits, . _ - (max 40)" />
-            <Input name="fullName" label="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} maxLength={LIMITS.fullName} />
-          </div>
+          <Input
+            name="fullName"
+            label="Full name"
+            hint={`The ${role} code is assigned automatically.`}
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            maxLength={LIMITS.fullName}
+          />
         )}
         <ul className="flex list-disc flex-col gap-1 pl-5 text-sm text-ink-muted">
           {consequences.map((c) => (

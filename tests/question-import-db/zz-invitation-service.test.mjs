@@ -17,7 +17,7 @@ const REDIRECT = "http://localhost:3000/auth/confirm";
 let W;
 let n = 0;
 const uniq = (p) => `${p}${Date.now().toString(36)}${++n}`;
-const input = (o = {}) => ({ email: `${uniq("svc")}@svc.test`, role: "student", fullName: "Svc Person", studentCode: uniq("SVC-"), ...o });
+const input = (o = {}) => ({ email: `${uniq("svc")}@svc.test`, role: "student", fullName: "Svc Person", ...o });
 const inv = (id) =>
   db.admin(`select json_build_object('email', email, 'status', status, 'delivery', delivery_status, 'resend_count', resend_count,
               'last_sent_at', last_sent_at, 'auth_user_id', auth_user_id) from public.user_invitations where id = '${id}'`);
@@ -141,7 +141,8 @@ test("Auth refusal (already registered) is recorded as failed; no answer leaves 
 test("CRITICAL: Auth sent but recording failed → sent_unrecorded; database left as begin left it; recoverable by a later resend", async () => {
   const broken = fakeAuth("record_throws");
   const r = await quiet(() => serviceFor(W.isv_SA, "admin", broken).inviteUser(input()));
-  assert.deepEqual(r, { kind: "sent_unrecorded", invitationId: r.invitationId });
+  assert.deepEqual(r, { kind: "sent_unrecorded", invitationId: r.invitationId, code: r.code });
+  assert.match(r.code, /^STU-\d{5,}$/, "the generated code is reported even when recording failed (0020)");
   assert.equal(broken.calls.length, 1, "exactly one Auth invite — no automatic second send");
   const row = await inv(r.invitationId);
   assert.deepEqual([row.status, row.delivery, row.auth_user_id], ["pending", "not_sent", null], "no compensating write");
@@ -218,7 +219,8 @@ test("race: invitation revoked between begin and Auth → sent_unrecorded, nothi
     assert.equal(r.data?.ok, true);
   });
   const out = await quiet(() => serviceFor(W.isv_SA, "admin", auth).inviteUser(input()));
-  assert.deepEqual(out, { kind: "sent_unrecorded", invitationId });
+  assert.deepEqual(out, { kind: "sent_unrecorded", invitationId, code: out.code });
+  assert.match(out.code, /^STU-\d{5,}$/);
   assert.equal(auth.calls.length, 1);
   const row = await inv(invitationId);
   assert.deepEqual([row.status, row.delivery, row.auth_user_id], ["revoked", "not_sent", null]);

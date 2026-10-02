@@ -32,11 +32,11 @@ export async function setAccountStatusAction(userId: string, status: string, rea
   return run("setAccountStatus", () => usersService.setAccountStatus(userId, status, reason ?? null));
 }
 
-/** Change an account's role ("admin" | "trainer" | "student"), with the new record's code and name when one is needed. */
+/** Change an account's role ("admin" | "trainer" | "student"), with the new record's full name when one is needed (its code is generated). */
 export async function changeUserRoleAction(
   userId: string,
   role: string,
-  record?: { code?: string; fullName?: string } | null
+  record?: { fullName?: string } | null
 ): Promise<UserActionResult> {
   return run("changeUserRole", () => usersService.changeRole(userId, role, record ?? null));
 }

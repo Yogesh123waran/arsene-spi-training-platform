@@ -32,7 +32,8 @@ export class InvitationsFunctionError extends InvitationsRepositoryError {
   }
 }
 
-export type CreateInvitationResult = { ok: true; invitationId: string } | { ok: false; reason: string };
+/** `code`: the generated student/trainer code (0020); null for a Super Admin invitation. */
+export type CreateInvitationResult = { ok: true; invitationId: string; code: string | null } | { ok: false; reason: string };
 
 export type BeginDeliveryResult =
   | { ok: true; invitationId: string; email: string; expiresAt: string; attempt: "initial" | "resend"; resendCount: number }
@@ -82,7 +83,9 @@ export function createInvitationsRepository(getClient: () => Promise<Client | nu
   return {
     async createInvitation(p: Record<string, Json>): Promise<CreateInvitationResult> {
       const d = await call("createInvitation", (s) => s.rpc("create_user_invitation", { p }));
-      if (d.ok === true && typeof d.invitation_id === "string") return { ok: true, invitationId: d.invitation_id };
+      if (d.ok === true && typeof d.invitation_id === "string") {
+        return { ok: true, invitationId: d.invitation_id, code: typeof d.code === "string" ? d.code : null };
+      }
       return { ok: false, reason: typeof d.reason === "string" ? d.reason : "unknown" };
     },
 

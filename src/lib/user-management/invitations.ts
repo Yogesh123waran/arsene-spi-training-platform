@@ -46,8 +46,6 @@ export interface InviteUserInput {
   /** Application role name: "admin" | "trainer" | "student". */
   role?: unknown;
   fullName?: unknown;
-  studentCode?: unknown;
-  trainerCode?: unknown;
   phone?: unknown;
   organization?: unknown;
   designation?: unknown;
@@ -59,8 +57,6 @@ export interface InviteUserInput {
 const TEXT_FIELDS: [keyof InviteUserInput, string, number][] = [
   ["email", "email", 254],
   ["fullName", "full_name", 200],
-  ["studentCode", "student_code", 40],
-  ["trainerCode", "trainer_code", 40],
   ["phone", "phone", 40],
   ["organization", "organization", 200],
   ["designation", "designation", 200],
@@ -142,7 +138,6 @@ export function classifyAuthInviteError(e: AuthErrorLike | null | undefined): Au
 export const CREATE_REASON_MESSAGE: Record<InvitationCreateRefusal, string> = {
   account_exists: "This address already belongs to an account. Use the account's lifecycle actions instead.",
   already_invited: "This address already has a pending invitation. Resend it instead.",
-  code_in_use: "That code is already in use.",
   batch_not_current: "Choose an upcoming or ongoing batch.",
   rate_limited: "Too many invitations in the last hour. Try again later.",
   email_unavailable: "This address can't be invited.",
@@ -203,5 +198,65 @@ export function invitationOutcomeMessage(o: InvitationSendOutcome): string {
       return "The invitation email was sent, but its delivery status couldn't be saved. Don't resend it; check the invitation status shortly.";
     case "unavailable":
       return "Invitation emails aren't configured on this server. Nothing was sent.";
+  }
+}
+
+// -------------------------------------------------------------------
+// Presentation helpers for the invitation dialog (P3.4 slice 2)
+// -------------------------------------------------------------------
+
+/** The database's resend cooldown (0019); a new attempt is authorized only after it. */
+export const RESEND_COOLDOWN_SECONDS = 60;
+
+/** Which form field a create refusal belongs to (otherwise it is a form-level error). */
+export function createRefusalField(reason: InvitationCreateRefusal): "email" | null {
+  if (reason === "account_exists" || reason === "already_invited" || reason === "email_unavailable") return "email";
+  return null;
+}
+
+export type OutcomeTone = "success" | "info" | "warning" | "error";
+
+export function outcomeTone(o: InvitationSendOutcome): OutcomeTone {
+  switch (o.kind) {
+    case "sent":
+      return "success";
+    case "sent_unrecorded":
+      return "info";
+    case "delivery_unknown":
+      return "warning";
+    case "refused":
+      return o.reason === "cooldown" ? "info" : "error";
+    default:
+      return "error";
+  }
+}
+
+/**
+ * Whether the dialog may offer a resend for this outcome, and when. The
+ * database still decides (cooldown, cap, expiry) — this only avoids
+ * offering what it will certainly refuse, and never offers an immediate
+ * second email:
+ *   delivery_failed  — only for transient reasons (rate limit / generic Auth error), after the cooldown
+ *   delivery_unknown — after the cooldown, with a warning that it may send a second email
+ *   cooldown         — after the remaining wait
+ *   sent, sent_unrecorded, resend_limit, expired, not_pending, not_found, permission, invalid, unavailable — never
+ */
+export function resendGuidance(o: InvitationSendOutcome): { allowed: boolean; afterSeconds: number; warning: string | null } {
+  const no = { allowed: false, afterSeconds: 0, warning: null };
+  switch (o.kind) {
+    case "delivery_failed":
+      return o.reason === "rate_limited" || o.reason === "auth_error" ? { allowed: true, afterSeconds: RESEND_COOLDOWN_SECONDS, warning: null } : no;
+    case "delivery_unknown":
+      return {
+        allowed: true,
+        afterSeconds: RESEND_COOLDOWN_SECONDS,
+        warning: "If the first email did arrive, resending will send the person a second one.",
+      };
+    case "refused":
+      return o.stage === "deliver" && o.reason === "cooldown" && o.invitationId
+        ? { allowed: true, afterSeconds: Math.max(1, o.retryAfterSeconds ?? RESEND_COOLDOWN_SECONDS), warning: null }
+        : no;
+    default:
+      return no;
   }
 }

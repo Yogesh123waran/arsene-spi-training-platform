@@ -96,7 +96,13 @@ export function createInvitationsService(deps: InvitationsServiceDeps) {
     return delivery ? { redirectTo, delivery } : null;
   }
 
-  async function deliver(invitationId: string, sending: { redirectTo: string; delivery: AuthAdminDelivery }): Promise<InvitationSendOutcome> {
+  async function deliver(
+    invitationId: string,
+    sending: { redirectTo: string; delivery: AuthAdminDelivery },
+    code: string | null = null
+  ): Promise<InvitationSendOutcome> {
+    /** The generated code travels with every outcome after creation, so the UI can show it. */
+    const withCode = code ? { code } : {};
     // 1. Database authorization of this attempt (caller's session).
     let begun;
     try {
@@ -123,7 +129,7 @@ export function createInvitationsService(deps: InvitationsServiceDeps) {
     if (sent.kind === "unknown") {
       // No definite answer: nothing is recorded (the email may have gone out).
       logDelivery(invitationId, "delivery_unknown", { auth: sent.diagnostic });
-      return { kind: "delivery_unknown", invitationId };
+      return { kind: "delivery_unknown", invitationId, ...withCode };
     }
     if (sent.kind === "refused") {
       const recorded = await sending.delivery.recordDelivery(invitationId, false, null);
@@ -133,7 +139,7 @@ export function createInvitationsService(deps: InvitationsServiceDeps) {
         recorded: recorded.ok,
         ...(recorded.ok ? {} : { record: recorded.reason }),
       });
-      return { kind: "delivery_failed", invitationId, reason: sent.failure, recorded: recorded.ok };
+      return { kind: "delivery_failed", invitationId, reason: sent.failure, recorded: recorded.ok, ...withCode };
     }
 
     // 3. Auth sent it: record the outcome and the Auth account (service role, same client).
@@ -141,9 +147,9 @@ export function createInvitationsService(deps: InvitationsServiceDeps) {
     if (!recorded.ok) {
       // Distinct from a delivery failure: the email went out. No second invite, no compensating write.
       logDelivery(invitationId, "sent_unrecorded", { record: recorded.reason });
-      return { kind: "sent_unrecorded", invitationId };
+      return { kind: "sent_unrecorded", invitationId, ...withCode };
     }
-    return { kind: "sent", invitationId, attempt: begun.attempt };
+    return { kind: "sent", invitationId, attempt: begun.attempt, ...withCode };
   }
 
   return {
@@ -167,7 +173,7 @@ export function createInvitationsService(deps: InvitationsServiceDeps) {
         const reason: InvitationCreateRefusal = asCreateRefusal(created.reason) ?? unexpectedRefusal("create", created.reason);
         return { kind: "refused", stage: "create", reason, invitationId: null };
       }
-      return deliver(created.invitationId, sending);
+      return deliver(created.invitationId, sending, created.code);
     },
 
     /** Resend a pending invitation (the database enforces cooldown, cap and expiry). */
