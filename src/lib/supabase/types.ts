@@ -900,6 +900,40 @@ export type QuestionImportFingerprintsRow = {
   text_fingerprint: string;
 };
 
+// -------------------------------------------------------------------
+// User management (0017_user_management_foundation.sql)
+// -------------------------------------------------------------------
+
+/** Mirrors public.user_admin_event_type. */
+export type UserAdminEventTypeColumn =
+  | "invitation_created"
+  | "invitation_withheld"
+  | "invitation_resent"
+  | "invitation_revoked"
+  | "invitation_expired"
+  | "invitation_accepted"
+  | "account_status_changed"
+  | "role_changed"
+  | "enrollment_changed"
+  | "trainer_assignment_changed"
+  | "user_details_changed";
+
+/**
+ * public.user_admin_events — append-only audit of user-management
+ * actions. Written only by the 0017 functions (actor and time stamped by
+ * the database); clients may only SELECT (Super Admin: all rows).
+ */
+export type UserAdminEventsRow = {
+  id: number;
+  occurred_at: string;
+  actor_id: string | null;
+  event_type: UserAdminEventTypeColumn;
+  target_user_id: string | null;
+  invitation_id: string | null;
+  batch_id: string | null;
+  detail: Json;
+};
+
 /** One row returned by public.my_notifications(p_limit). */
 export type MyNotificationsRow = {
   id: string;
@@ -1395,6 +1429,12 @@ export type Database = {
         Update: NoClientWrites;
         Relationships: [];
       };
+      user_admin_events: {
+        Row: UserAdminEventsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
     };
     Views: {
       test_best_results: {
@@ -1626,6 +1666,27 @@ export type Database = {
       };
       discard_question_import: {
         Args: { p_run_id: string };
+        Returns: Json;
+      };
+      // --- 0017 user management (Super Admin; each function checks the caller, scope and protections) ---
+      /** active → suspended; suspended → active only if active before (0018). Returns { ok, reason?, previous?, status? }. */
+      admin_set_account_status: {
+        Args: { p_user_id: string; p_status: AccountStatusColumn; p_reason?: string | null };
+        Returns: Json;
+      };
+      /** Role change of an active account (or completing its missing domain record). Returns { ok, reason?, previous?, role? }. */
+      admin_set_user_role: {
+        Args: { p_user_id: string; p_role: AppRoleColumn; p_details?: Json };
+        Returns: Json;
+      };
+      /** Name + contact details of a student. Returns { ok, reason?, fields? }. */
+      admin_update_student: {
+        Args: { p_student_id: string; p: Json };
+        Returns: Json;
+      };
+      /** Name + contact details of a trainer. Returns { ok, reason?, fields? }. */
+      admin_update_trainer: {
+        Args: { p_trainer_id: string; p: Json };
         Returns: Json;
       };
     };

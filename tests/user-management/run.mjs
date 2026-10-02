@@ -1,4 +1,4 @@
-// Users view (Phase 7 P3.2) — pure tests for src/lib/user-management and the users service.
+// Users view + lifecycle actions (Phase 7 P3.2/P3.3) — pure tests for src/lib/user-management and the users service.
 //   node tests/user-management/run.mjs
 // Transpiles with the project's own `typescript` into a temp folder and runs
 // Node's built-in test runner (no extra packages, no package.json scripts).
@@ -16,7 +16,9 @@ const sources = [
   "src/types/user.ts",
   "src/types/user-management.ts",
   "src/lib/supabase/paging.ts",
+  "src/lib/auth/roles.ts",
   "src/lib/user-management/users.ts",
+  "src/lib/user-management/lifecycle.ts",
   "src/repositories/users.repository.core.ts",
   "src/services/users.service.core.ts",
 ];

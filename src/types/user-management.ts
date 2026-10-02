@@ -103,3 +103,63 @@ export interface UserListPage {
   pageSize: number;
   totals: UserListTotals;
 }
+
+// -------------------------------------------------------------------
+// Lifecycle actions (Phase 7 P3.3)
+// -------------------------------------------------------------------
+
+/** Contact/profile fields of the current role's record, as editable by a Super Admin. */
+export interface StudentDetailFields {
+  fullName: string;
+  phone: string | null;
+  organization: string | null;
+  designation: string | null;
+}
+
+export interface TrainerDetailFields {
+  fullName: string;
+  phone: string | null;
+  specializations: string[];
+  bio: string | null;
+}
+
+export type UserContactDetails =
+  | { kind: "student"; fields: StudentDetailFields }
+  | { kind: "trainer"; fields: TrainerDetailFields };
+
+/** One entry of the account's audit history (public.user_admin_events, newest first). */
+export interface UserAuditEntry {
+  id: number;
+  occurredAt: string;
+  /** Plain-language description built from the event type and its detail. */
+  summary: string;
+  /** "you" when the viewer performed it; otherwise the actor's id, or null for system changes. */
+  actor: string | null;
+}
+
+/**
+ * Which controls the panel offers. A presentation hint only — derived
+ * from the same rules the database enforces, which still decides every
+ * action (self-protection, last Super Admin, transitions, scope).
+ */
+export interface UserActionAvailability {
+  suspend: boolean;
+  reactivate: boolean;
+  changeRole: boolean;
+  editDetails: boolean;
+  /** Why status/role controls are unavailable (e.g. your own account), when they are. */
+  note: string | null;
+}
+
+export interface UserDetail {
+  user: UserSummary;
+  isSelf: boolean;
+  hasStudentRecord: boolean;
+  hasTrainerRecord: boolean;
+  contact: UserContactDetails | null;
+  history: UserAuditEntry[];
+  actions: UserActionAvailability;
+}
+
+/** Plain, serializable result of a lifecycle server action. */
+export type UserActionResult = { ok: true; message: string } | { ok: false; error: string };

@@ -6,7 +6,8 @@ import { createUsersService } from "./users.service.core";
 
 /**
  * The Users service bound to the real session (authService) and the
- * caller's own Supabase client (RLS applies). Read-only.
+ * caller's own Supabase client (RLS applies; changes go through the
+ * 0017 database functions).
  */
 export const usersService = createUsersService({
   repository: usersRepository,
@@ -14,5 +15,5 @@ export const usersService = createUsersService({
   isDemoMode: () => authConfig.mode === "demo",
 });
 
-export { UsersAuthorizationError } from "./users.service.core";
+export { UsersActionError, UsersAuthorizationError } from "./users.service.core";
 export { UsersRepositoryError } from "@/repositories/users.repository";

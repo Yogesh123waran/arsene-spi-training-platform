@@ -301,7 +301,7 @@ test("acceptance: trainer and Super Admin roles; no batch room → accepted with
 
 // ---------------------------------------------------------------- account status
 
-test("account status: active ↔ suspended, invited → suspended; never yourself; audited and stamped; trainers cannot", async () => {
+test("account status: active ↔ suspended (invited accounts unchanged — 0018); never yourself; audited and stamped; trainers cannot", async () => {
   const sa = as("um_SA");
   assert.deepEqual(await call(sa, "admin_set_account_status", { p_user_id: U.um_S4, p_status: "suspended", p_reason: "Left the company" }), { ok: true, previous: "active", status: "suspended" });
   assert.deepEqual(await profile("um_S4"), { role: "student", account_status: "suspended", account_status_changed_by: U.um_SA });
@@ -313,8 +313,10 @@ test("account status: active ↔ suspended, invited → suspended; never yoursel
 
   await newAuthUser("um_INV1", "invited1@um.test");
   assert.deepEqual(await call(sa, "admin_set_account_status", { p_user_id: U.um_INV1, p_status: "active" }), { ok: false, reason: "transition_not_allowed" }, "activation only through acceptance");
-  assert.deepEqual(await call(sa, "admin_set_account_status", { p_user_id: U.um_INV1, p_status: "suspended" }), { ok: true, previous: "invited", status: "suspended" });
-  assert.deepEqual(await call(sa, "admin_set_account_status", { p_user_id: U.um_INV1, p_status: "invited" }), { ok: false, reason: "transition_not_allowed" });
+  // 0018: invited → suspended is refused too (only acceptance moves an account out of invited).
+  assert.deepEqual(await call(sa, "admin_set_account_status", { p_user_id: U.um_INV1, p_status: "suspended" }), { ok: false, reason: "transition_not_allowed" });
+  assert.equal((await profile("um_INV1")).account_status, "invited");
+  assert.deepEqual(await call(sa, "admin_set_account_status", { p_user_id: U.um_S4, p_status: "invited" }), { ok: false, reason: "transition_not_allowed" });
   assert.deepEqual(await call(sa, "admin_set_account_status", { p_user_id: U.um_SA, p_status: "suspended" }), { ok: false, reason: "cannot_change_self" });
   assert.deepEqual(await call(sa, "admin_set_account_status", { p_user_id: randomUUID(), p_status: "suspended" }), { ok: false, reason: "not_found" });
   // Another Super Admin may be suspended while others remain active.

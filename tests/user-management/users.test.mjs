@@ -339,7 +339,13 @@ const USER_FILES = [
   "src/app/admin/users/page.tsx",
   "src/app/admin/users/loading.tsx",
   "src/components/modules/UsersTable.tsx",
+  // P3.3 lifecycle actions
+  "src/lib/user-management/lifecycle.ts",
+  "src/services/users.actions.ts",
+  "src/components/modules/UserDetailPanel.tsx",
 ];
+/** The only database functions the Users module may call — the 0017 Super Admin functions for P3.3. */
+const ALLOWED_RPCS = ["admin_set_account_status", "admin_set_user_role", "admin_update_student", "admin_update_trainer"];
 
 test("source: no Users file imports the service-role client, reads auth.users or the service-role key", () => {
   for (const rel of USER_FILES) {
@@ -356,11 +362,28 @@ test("source: no Users file imports the service-role client, reads auth.users or
   assert.deepEqual(importers, []);
 });
 
-test("source: read-only — no writes, RPC calls, server actions or action controls", () => {
+test("source: no direct table writes; changes only through the approved 0017 functions; the list stays action-free", () => {
+  const rpcsIn = (code) => Array.from(code.matchAll(/\.rpc\(\s*["']([a-z_]+)["']/g), (m) => m[1]);
   for (const rel of USER_FILES) {
     const code = src(rel);
-    assert.doesNotMatch(code, /\.(insert|update|upsert|delete)\(|\.rpc\(|["']use server["']/, rel);
+    assert.doesNotMatch(code, /\.(insert|update|upsert|delete)\(/, `${rel}: no direct table writes`);
+    const rpcs = rpcsIn(code);
+    for (const fn of rpcs) assert.ok(ALLOWED_RPCS.includes(fn), `${rel}: unexpected RPC ${fn}`);
+    if (rpcs.length) assert.equal(rel, "src/repositories/users.repository.core.ts", "RPCs only in the repository");
+    if (/["']use server["']/.test(code)) assert.equal(rel, "src/services/users.actions.ts", "server actions only in users.actions.ts");
+    // Never here: invitations, acceptance, enrolment, trainer assignment, Auth Admin (later phases / out of scope).
+    assert.doesNotMatch(
+      code,
+      /create_user_invitation|revoke_user_invitation|expire_user_invitations|accept_user_invitation|admin_set_enrollment|admin_assign_batch_trainer|trainer_enroll_student|trainer_update_student|deleteUser|inviteUserByEmail/,
+      rel
+    );
   }
+  assert.deepEqual(rpcsIn(src("src/repositories/users.repository.core.ts")).sort(), [...ALLOWED_RPCS].sort());
+  const actions = src("src/services/users.actions.ts");
+  assert.match(actions, /^"use server";/);
+  assert.doesNotMatch(actions, /@\/repositories\/|@\/lib\/supabase\//, "actions go through the service only");
+  const panel = src("src/components/modules/UserDetailPanel.tsx");
+  assert.doesNotMatch(panel, /@\/services\/users\.service|@\/repositories\/|@\/lib\/supabase\/(server|admin)/, "the client panel only calls server actions");
   const table = src("src/components/modules/UsersTable.tsx");
   assert.doesNotMatch(table, /Dropdown|method=["']post["']|onClick=|Suspend|Invite|Remove|Edit/);
   assert.doesNotMatch(table, /@\/services\/|@\/repositories\//, "the client component receives data only");

@@ -2,26 +2,33 @@ import { CircleSlash, MailQuestion, UserCheck, UserX } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { SummaryStat } from "@/components/dashboard/SummaryStat";
 import { ErrorState } from "@/components/ui/ErrorState";
+import { UserDetailPanel } from "@/components/modules/UserDetailPanel";
 import { UsersTable } from "@/components/modules/UsersTable";
+import { usersHref } from "@/lib/user-management/users";
 import { usersService, UsersAuthorizationError } from "@/services/users.service";
-import type { UserListPage } from "@/types/user-management";
+import type { UserDetail, UserListPage } from "@/types/user-management";
 
 export const dynamic = "force-dynamic";
 
 const BASE_PATH = "/admin/users";
 
 /**
- * Users (admin, read-only). The layout's RoleGuard admits only Super
- * Admins; usersService re-checks the signed-in user server-side and RLS
- * decides every row. Filters come from the URL and are validated there;
- * only the requested page is sent to the browser.
+ * Users (admin). The layout's RoleGuard admits only Super Admins;
+ * usersService re-checks the signed-in user server-side and RLS decides
+ * every row. Filters come from the URL and are validated there; only the
+ * requested page is sent to the browser. `?user=<id>` opens that
+ * account's detail panel, whose lifecycle actions go through server
+ * actions and the 0017 database functions.
  */
 export default async function AdminUsersPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
   let data: UserListPage | null = null;
+  let detail: UserDetail | null = null;
   let loadError: string | null = null;
+  const selected = typeof searchParams.user === "string" ? searchParams.user : null;
 
   try {
     data = await usersService.listUsers(searchParams);
+    if (selected) detail = await usersService.getUserDetail(selected);
   } catch (err) {
     if (err instanceof UsersAuthorizationError) {
       loadError = err.message;
@@ -33,7 +40,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: R
 
   return (
     <div>
-      <PageHeader title="Users" description="Every account on the platform: role, account status, domain record and batches. Read-only." />
+      <PageHeader title="Users" description="Every account on the platform: role, account status, domain record and batches. Open an account to manage its lifecycle." />
       {loadError || !data ? (
         <ErrorState title="We couldn't load the users" description={loadError ?? "Please try again."} />
       ) : (
@@ -44,7 +51,11 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: R
             <SummaryStat label="Suspended" value={String(data.totals.byStatus.suspended)} icon={UserX} tone="red" />
             <SummaryStat label="Missing domain record" value={String(data.totals.missingRecord)} icon={CircleSlash} tone="blue" />
           </div>
-          <UsersTable data={data} basePath={BASE_PATH} />
+          {selected && !detail && (
+            <ErrorState title="Account not found" description="That account doesn't exist or can't be shown." />
+          )}
+          {detail && <UserDetailPanel detail={detail} closeHref={usersHref(BASE_PATH, data.filters)} />}
+          <UsersTable data={data} basePath={BASE_PATH} selectedId={detail?.user.id ?? null} />
         </div>
       )}
     </div>

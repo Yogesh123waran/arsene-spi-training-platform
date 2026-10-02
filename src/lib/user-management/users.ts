@@ -32,7 +32,7 @@ const PAGE_MAX = 100_000;
 // profiles; see users.repository.core.ts). One-to-one embeds may arrive
 // as an object or a one-element array, so both are accepted.
 // -------------------------------------------------------------------
-type OneOrMany<T> = T | T[] | null | undefined;
+export type OneOrMany<T> = T | T[] | null | undefined;
 
 export interface UserBatchRecord {
   id: string;
@@ -68,7 +68,7 @@ export interface UserProfileRecord {
   trainers: OneOrMany<UserTrainerRecord>;
 }
 
-function one<T>(value: OneOrMany<T>): T | null {
+export function one<T>(value: OneOrMany<T>): T | null {
   if (Array.isArray(value)) return value[0] ?? null;
   return value ?? null;
 }
@@ -149,6 +149,12 @@ export function usersHref(basePath: string, filters: UserListFilters, changes: P
   if (f.page > 1) params.set("page", String(f.page));
   const qs = params.toString();
   return qs ? `${basePath}?${qs}` : basePath;
+}
+
+/** The same view with one account's detail panel open (P3.3). */
+export function userDetailHref(basePath: string, filters: UserListFilters, userId: string): string {
+  const href = usersHref(basePath, filters);
+  return `${href}${href.includes("?") ? "&" : "?"}user=${encodeURIComponent(userId)}`;
 }
 
 // -------------------------------------------------------------------

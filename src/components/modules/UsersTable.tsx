@@ -14,7 +14,7 @@ import { Select } from "@/components/ui/Select";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/Table";
 import { ROLE_LABEL } from "@/lib/auth/roles";
-import { ACCOUNT_STATUS_LABEL, RECORD_FILTER_LABEL, SEARCH_MAX_LENGTH, usersHref } from "@/lib/user-management/users";
+import { ACCOUNT_STATUS_LABEL, RECORD_FILTER_LABEL, SEARCH_MAX_LENGTH, userDetailHref, usersHref } from "@/lib/user-management/users";
 import { formatDate } from "@/utils/format";
 import type { UserListPage, UserSummary } from "@/types/user-management";
 
@@ -122,12 +122,12 @@ function BatchesCell({ u }: { u: UserSummary }) {
 }
 
 /**
- * Read-only Users table (Super Admin). Rows, filters and page come from
- * the server (usersService); this component only renders them and moves
- * between pages through the URL. No actions — changes to accounts are a
- * later phase.
+ * Users table (Super Admin). Rows, filters and page come from the server
+ * (usersService); this component only renders them and moves between
+ * pages through the URL. It has no actions itself: a name opens that
+ * account's detail panel (UserDetailPanel), where lifecycle actions live.
  */
-export function UsersTable({ data, basePath }: { data: UserListPage; basePath: string }) {
+export function UsersTable({ data, basePath, selectedId = null }: { data: UserListPage; basePath: string; selectedId?: string | null }) {
   const router = useRouter();
   const filtered = data.filters.q !== "" || data.filters.role !== "all" || data.filters.status !== "all" || data.filters.record !== "all";
 
@@ -163,14 +163,18 @@ export function UsersTable({ data, basePath }: { data: UserListPage; basePath: s
           </TableHead>
           <TableBody>
             {data.rows.map((u) => (
-              <TableRow key={u.id} data-user={u.id}>
+              <TableRow key={u.id} data-user={u.id} className={u.id === selectedId ? "bg-signal-blueSoft/40" : undefined}>
                 <TableCell>
                   <div className="flex items-center gap-3">
                     <Avatar name={u.name ?? "?"} size="sm" tone={u.name ? "blue" : "neutral"} />
                     <div className="min-w-0">
-                      <p className={u.name ? "truncate text-sm font-medium text-ink" : "truncate text-sm italic text-ink-muted"}>
+                      <Link
+                        href={userDetailHref(basePath, data.filters, u.id)}
+                        aria-current={u.id === selectedId ? "true" : undefined}
+                        className={u.name ? "block truncate text-sm font-medium text-ink hover:text-signal-blue hover:underline" : "block truncate text-sm italic text-ink-muted hover:text-signal-blue hover:underline"}
+                      >
                         {u.name ?? "No name on record"}
-                      </p>
+                      </Link>
                       <p className="truncate text-xs text-ink-muted">{u.email ?? "—"}</p>
                       <p className="truncate font-mono text-2xs text-ink-faint" title={u.id}>
                         {u.id}

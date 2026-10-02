@@ -1,0 +1,366 @@
+/**
+ * User lifecycle actions (Phase 7 P3.3) — pure logic: validation of the
+ * values a browser may send, the change set for detail edits, safe
+ * messages for every outcome the 0017 functions can return, audit
+ * history wording and the panel's action hints.
+ *
+ * Authorization is NOT decided here. The 0017 SECURITY DEFINER functions
+ * check the caller (active Super Admin), the target, the transition,
+ * self-protection and the last-active-Super-Admin rule, and write the
+ * audit row in the same transaction. Everything here only prepares the
+ * request and words the answer; nothing here can widen what the
+ * database allows.
+ */
+import type { AppRoleColumn, Json } from "@/lib/supabase/types";
+import type { UserRole } from "@/types/user";
+import type {
+  StudentDetailFields,
+  TrainerDetailFields,
+  UserActionAvailability,
+  UserAuditEntry,
+  UserContactDetails,
+  UserDetail,
+  UserSummary,
+} from "@/types/user-management";
+import { ROLE_LABEL } from "@/lib/auth/roles";
+import {
+  ACCOUNT_STATUS_LABEL,
+  mapUserRecord,
+  one,
+  type OneOrMany,
+  type UserProfileRecord,
+  type UserStudentRecord,
+  type UserTrainerRecord,
+} from "./users";
+
+export const LIMITS = {
+  reason: 500,
+  fullName: 200,
+  phone: 40,
+  organization: 200,
+  designation: 200,
+  bio: 2000,
+  specializations: 20,
+  specialization: 100,
+} as const;
+
+/** Same rule as the 0017 code checks. */
+export const RECORD_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isUuid(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+// -------------------------------------------------------------------
+// Detail record (one profile with its contact details) + audit rows
+// -------------------------------------------------------------------
+export interface UserDetailRecord extends Omit<UserProfileRecord, "students" | "trainers"> {
+  students: OneOrMany<
+    Omit<UserStudentRecord, "student_details"> & {
+      student_details: OneOrMany<{ email: string | null; phone: string | null; organization: string | null; designation: string | null }>;
+    }
+  >;
+  trainers: OneOrMany<
+    Omit<UserTrainerRecord, "trainer_details"> & {
+      trainer_details: OneOrMany<{ email: string | null; phone: string | null; specializations: string[] | null; bio: string | null }>;
+    }
+  >;
+}
+
+export interface UserAuditRecord {
+  id: number;
+  occurred_at: string;
+  event_type: string;
+  actor_id: string | null;
+  detail: Json;
+}
+
+// -------------------------------------------------------------------
+// Request validation (values from the browser are never trusted)
+// -------------------------------------------------------------------
+export type ValidationResult<T> = { ok: true; value: T } | { ok: false; error: string };
+
+/** Only the two statuses an administrator may set; "invited" is never a target. */
+export function parseTargetStatus(value: unknown): ValidationResult<"active" | "suspended"> {
+  return value === "active" || value === "suspended" ? { ok: true, value } : { ok: false, error: "Choose a valid account status." };
+}
+
+const APP_TO_DB_ROLE: Record<UserRole, AppRoleColumn> = { admin: "super_admin", trainer: "trainer", student: "student" };
+
+/** Application role name ("admin" | "trainer" | "student") → database role; anything else is refused. */
+export function parseTargetRole(value: unknown): ValidationResult<AppRoleColumn> {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(APP_TO_DB_ROLE, value)
+    ? { ok: true, value: APP_TO_DB_ROLE[value as UserRole] }
+    : { ok: false, error: "Choose a valid role." };
+}
+
+/** Trimmed text or null when blank; too long → error. */
+function text(value: unknown, label: string, max: number): ValidationResult<string | null> {
+  if (value === null || value === undefined) return { ok: true, value: null };
+  if (typeof value !== "string") return { ok: false, error: `${label} must be text.` };
+  const v = value.trim();
+  if (v.length > max) return { ok: false, error: `${label} can be at most ${max} characters.` };
+  return { ok: true, value: v === "" ? null : v };
+}
+
+export function normalizeReason(value: unknown): ValidationResult<string | null> {
+  return text(value, "The reason", LIMITS.reason);
+}
+
+/**
+ * Details for the role function. A new student/trainer record needs a
+ * code and a full name; for any other change (an existing record is
+ * reactivated by the database, or the target is Super Admin) nothing is
+ * sent — the function would refuse unexpected keys anyway.
+ */
+export function buildRoleDetails(
+  role: AppRoleColumn,
+  needsRecord: boolean,
+  input: { code?: unknown; fullName?: unknown } | null | undefined
+): ValidationResult<Record<string, string>> {
+  if (role === "super_admin" || !needsRecord) return { ok: true, value: {} };
+  const name = text(input?.fullName, "Full name", LIMITS.fullName);
+  if (!name.ok) return name;
+  if (!name.value) return { ok: false, error: `A full name is needed to create the ${role} record.` };
+  const code = text(input?.code, role === "student" ? "Student code" : "Trainer code", 40);
+  if (!code.ok) return code;
+  if (!code.value || !RECORD_CODE_PATTERN.test(code.value)) {
+    return { ok: false, error: "Use 1–40 letters, digits, dots, dashes or underscores for the code, starting with a letter or digit." };
+  }
+  return { ok: true, value: role === "student" ? { student_code: code.value, full_name: name.value } : { trainer_code: code.value, full_name: name.value } };
+}
+
+const sameText = (a: string | null, b: string | null) => (a ?? null) === (b ?? null);
+
+/**
+ * Only the fields that actually change, as the 0017 function's keys —
+ * so an unchanged form writes nothing and audits nothing.
+ */
+export function buildDetailsPatch(contact: UserContactDetails, input: Record<string, unknown> | null | undefined): ValidationResult<Record<string, Json>> {
+  const src = input ?? {};
+  const patch: Record<string, Json> = {};
+  const name = text(src.fullName, "Full name", LIMITS.fullName);
+  if (!name.ok) return name;
+  if (!name.value) return { ok: false, error: "A full name is required." };
+  if (name.value !== contact.fields.fullName) patch.full_name = name.value;
+  const phone = text(src.phone, "Phone", LIMITS.phone);
+  if (!phone.ok) return phone;
+  if (!sameText(phone.value, contact.fields.phone)) patch.phone = phone.value;
+
+  if (contact.kind === "student") {
+    const current: StudentDetailFields = contact.fields;
+    const org = text(src.organization, "Organization", LIMITS.organization);
+    if (!org.ok) return org;
+    if (!sameText(org.value, current.organization)) patch.organization = org.value;
+    const des = text(src.designation, "Designation", LIMITS.designation);
+    if (!des.ok) return des;
+    if (!sameText(des.value, current.designation)) patch.designation = des.value;
+  } else {
+    const current: TrainerDetailFields = contact.fields;
+    const bio = text(src.bio, "Bio", LIMITS.bio);
+    if (!bio.ok) return bio;
+    if (!sameText(bio.value, current.bio)) patch.bio = bio.value;
+    const raw = src.specializations;
+    if (raw !== undefined) {
+      if (!Array.isArray(raw) || raw.some((s) => typeof s !== "string")) return { ok: false, error: "Specializations must be a list of text." };
+      const specs = Array.from(new Set((raw as string[]).map((s) => s.trim()).filter(Boolean)));
+      if (specs.length > LIMITS.specializations) return { ok: false, error: `At most ${LIMITS.specializations} specializations.` };
+      if (specs.some((s) => s.length > LIMITS.specialization)) return { ok: false, error: `Each specialization can be at most ${LIMITS.specialization} characters.` };
+      if (specs.join("\u0000") !== current.specializations.join("\u0000")) patch.specializations = specs;
+    }
+  }
+  return { ok: true, value: patch };
+}
+
+// -------------------------------------------------------------------
+// Outcomes → safe messages (never database internals)
+// -------------------------------------------------------------------
+const LAST_SUPER_ADMIN = "This is the last active Super Admin. Another Super Admin must be active before this account can lose that access.";
+
+export const STATUS_REASON_MESSAGE: Record<string, string> = {
+  cannot_change_self: "You can't change the status of your own account.",
+  not_found: "That account no longer exists.",
+  unchanged: "The account already has that status.",
+  transition_not_allowed: "That status change isn't allowed. An invited account changes only when its invitation is accepted.",
+  never_activated: "This account was never activated. It can only become active by accepting an invitation.",
+  last_super_admin: LAST_SUPER_ADMIN,
+};
+
+export const ROLE_REASON_MESSAGE: Record<string, string> = {
+  cannot_change_self: "You can't change your own role.",
+  not_found: "That account no longer exists.",
+  account_not_active: "Only an active account can change role.",
+  unchanged: "The account already has that role and record.",
+  last_super_admin: LAST_SUPER_ADMIN,
+  has_current_batches: "This trainer still has upcoming or ongoing batches. Assign those batches to another trainer first.",
+  has_active_enrollments: "This student is still enrolled in a batch. The enrolment must be withdrawn or completed first.",
+  has_attempt_in_progress: "This student has a test attempt in progress. Try again once it has finished.",
+  details_required: "A full name and a valid code are needed to create the new record.",
+  code_in_use: "That code is already in use.",
+  no_email: "This account has no email address, so a record can't be created for it.",
+};
+
+export const DETAILS_REASON_MESSAGE: Record<string, string> = {
+  not_found: "That record no longer exists.",
+  unchanged: "Nothing changed.",
+  no_contact_record: "This account has no email address, so contact details can't be stored for it.",
+};
+
+export const GENERIC_ACTION_ERROR = "Something went wrong. Please try again.";
+export const PERMISSION_ERROR = "You don't have permission to do that.";
+export const INVALID_VALUES_ERROR = "Some of the values aren't valid. Check them and try again.";
+
+/** The message for a { ok: false, reason } answer; unknown reasons get the generic message. */
+export function reasonMessage(map: Record<string, string>, reason: unknown): string {
+  return (typeof reason === "string" && Object.prototype.hasOwnProperty.call(map, reason) ? map[reason] : undefined) ?? GENERIC_ACTION_ERROR;
+}
+
+/** A raised database error → a safe message, by SQLSTATE only (42501 permission, 22023 invalid value). */
+export function errorCodeMessage(code: unknown): string {
+  if (code === "42501") return PERMISSION_ERROR;
+  if (code === "22023" || code === "22P02" || code === "23514") return INVALID_VALUES_ERROR;
+  return GENERIC_ACTION_ERROR;
+}
+
+// -------------------------------------------------------------------
+// Audit history wording
+// -------------------------------------------------------------------
+const DB_ROLE_LABEL: Record<string, string> = { super_admin: ROLE_LABEL.admin, trainer: ROLE_LABEL.trainer, student: ROLE_LABEL.student };
+const FIELD_LABEL: Record<string, string> = {
+  full_name: "name",
+  phone: "phone",
+  organization: "organization",
+  designation: "designation",
+  specializations: "specializations",
+  bio: "bio",
+};
+const EVENT_LABEL: Record<string, string> = {
+  invitation_created: "Invitation created",
+  invitation_withheld: "Invitation withheld",
+  invitation_resent: "Invitation resent",
+  invitation_revoked: "Invitation revoked",
+  invitation_expired: "Invitation expired",
+  invitation_accepted: "Invitation accepted",
+  account_status_changed: "Account status changed",
+  role_changed: "Role changed",
+  enrollment_changed: "Enrolment changed",
+  trainer_assignment_changed: "Batch trainer assignment changed",
+  user_details_changed: "Details changed",
+};
+
+const str = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+const statusLabel = (v: unknown) => (str(v) && (ACCOUNT_STATUS_LABEL as Record<string, string>)[v as string]) || str(v) || "—";
+const roleLabel = (v: unknown) => (str(v) && DB_ROLE_LABEL[v as string]) || str(v) || "—";
+
+export function describeEvent(eventType: string, detail: Json): string {
+  const d = detail && typeof detail === "object" && !Array.isArray(detail) ? (detail as Record<string, Json>) : {};
+  switch (eventType) {
+    case "account_status_changed": {
+      const reason = str(d.reason);
+      return `Account status: ${statusLabel(d.from)} → ${statusLabel(d.to)}${reason ? ` — “${reason}”` : ""}`;
+    }
+    case "role_changed": {
+      const created = d.domain_record_created === true;
+      if (d.from === d.to) return `Created the missing ${roleLabel(d.to).toLowerCase()} record`;
+      return `Role: ${roleLabel(d.from)} → ${roleLabel(d.to)}${created ? " (new record created)" : ""}`;
+    }
+    case "user_details_changed": {
+      const fields = Array.isArray(d.fields) ? d.fields.filter((f): f is string => typeof f === "string").map((f) => FIELD_LABEL[f] ?? f) : [];
+      return fields.length ? `Details changed: ${fields.join(", ")}` : "Details changed";
+    }
+    case "enrollment_changed":
+      return `Enrolment: ${str(d.from) ?? "new"} → ${str(d.to) ?? "—"}`;
+    default:
+      return EVENT_LABEL[eventType] ?? "Account change";
+  }
+}
+
+export function mapAuditRecord(r: UserAuditRecord, viewerId: string): UserAuditEntry {
+  return {
+    id: r.id,
+    occurredAt: r.occurred_at,
+    summary: describeEvent(r.event_type, r.detail),
+    actor: r.actor_id === null ? null : r.actor_id === viewerId ? "you" : r.actor_id,
+  };
+}
+
+// -------------------------------------------------------------------
+// Detail mapping + action hints
+// -------------------------------------------------------------------
+export function mapContactDetails(r: UserDetailRecord, user: UserSummary): UserContactDetails | null {
+  if (user.recordState !== "present") return null;
+  if (user.role === "student") {
+    const s = one(r.students);
+    if (!s) return null;
+    const d = one(s.student_details);
+    return { kind: "student", fields: { fullName: s.full_name, phone: d?.phone ?? null, organization: d?.organization ?? null, designation: d?.designation ?? null } };
+  }
+  if (user.role === "trainer") {
+    const t = one(r.trainers);
+    if (!t) return null;
+    const d = one(t.trainer_details);
+    return { kind: "trainer", fields: { fullName: t.full_name, phone: d?.phone ?? null, specializations: d?.specializations ?? [], bio: d?.bio ?? null } };
+  }
+  return null;
+}
+
+/**
+ * The controls worth offering. Mirrors the database's own rules so the
+ * panel does not offer what will certainly be refused — the database
+ * still decides (the last-Super-Admin rule, in particular, is left
+ * entirely to it).
+ */
+/**
+ * Whether a suspended account was suspended straight from invited, i.e.
+ * never active — from its latest account-status audit row, exactly the
+ * fact 0018's admin_set_account_status checks (reason never_activated).
+ */
+export function isNeverActivated(user: UserSummary, latestStatusChange: { detail: Json } | null): boolean {
+  if (user.accountStatus !== "suspended" || !latestStatusChange) return false;
+  const d = latestStatusChange.detail;
+  return !!d && typeof d === "object" && !Array.isArray(d) && d.from === "invited";
+}
+
+export function actionAvailability(user: UserSummary, isSelf: boolean, neverActivated = false): UserActionAvailability {
+  const editDetails = user.recordState === "present";
+  if (isSelf) {
+    return { suspend: false, reactivate: false, changeRole: false, editDetails, note: "This is your own account. Its status and role can only be changed by another Super Admin." };
+  }
+  const note =
+    user.accountStatus === "invited"
+      ? "This account is invited and not yet active. It becomes active only when the invitation is accepted, so its status and role can't be changed here."
+      : neverActivated
+        ? "This account was suspended before it was ever activated, so it can't be reactivated. It can only become active by accepting an invitation."
+        : user.accountStatus === "suspended"
+          ? "Reactivate the account before changing its role."
+          : null;
+  return {
+    // 0018: only an active account can be suspended; invited accounts change only through acceptance.
+    suspend: user.accountStatus === "active",
+    // A hint only: the database refuses never-activated reactivation itself (0018).
+    reactivate: user.accountStatus === "suspended" && !neverActivated,
+    changeRole: user.accountStatus === "active",
+    editDetails,
+    note,
+  };
+}
+
+export function mapUserDetail(
+  r: UserDetailRecord,
+  audit: UserAuditRecord[],
+  viewerId: string,
+  latestStatusChange: { detail: Json } | null = null
+): UserDetail {
+  const user = mapUserRecord(r);
+  const isSelf = user.id === viewerId;
+  return {
+    user,
+    isSelf,
+    hasStudentRecord: one(r.students) !== null,
+    hasTrainerRecord: one(r.trainers) !== null,
+    contact: mapContactDetails(r, user),
+    history: audit.map((a) => mapAuditRecord(a, viewerId)),
+    actions: actionAvailability(user, isSelf, isNeverActivated(user, latestStatusChange)),
+  };
+}
