@@ -87,6 +87,10 @@ try {
     "src/repositories/invitations.repository.core.ts",
     "src/repositories/auth-admin.repository.core.ts",
     "src/services/invitations.service.core.ts",
+    // Invitation acceptance (Phase 7 P3.5)
+    "src/lib/auth/invite-acceptance.ts",
+    "src/repositories/invitation-acceptance.repository.core.ts",
+    "src/services/invitation-acceptance.service.core.ts",
   ];
   for (const rel of sources) {
     const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {

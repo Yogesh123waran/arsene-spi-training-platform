@@ -18,6 +18,10 @@ const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
   invalid_callback: "That link is missing information and can't be used. Please try signing in again.",
   auth_not_configured: "Sign-in isn't configured yet. Please contact your administrator.",
   expired_callback: "That link has expired or was already used. Please request a new one.",
+  // Invitation acceptance (/auth/confirm, /auth/accept).
+  invite_invalid: "That invitation link is invalid, has expired or was already used. Ask your administrator for a new invitation.",
+  invite_session_missing: "Your invitation session has ended. Open the invitation link from your email again.",
+  invite_failed: "We couldn't open your invitation. Please try again in a moment.",
 };
 
 export function LoginForm() {

@@ -12,7 +12,15 @@ import ts from "typescript";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
 const out = fs.mkdtempSync(path.join(os.tmpdir(), "auth-tests-"));
-for (const rel of ["src/types/user.ts", "src/lib/auth/profile-role.ts", "src/lib/auth/roles.ts"]) {
+for (const rel of [
+  "src/types/user.ts",
+  "src/lib/auth/profile-role.ts",
+  "src/lib/auth/roles.ts",
+  // Invitation acceptance (Phase 7 P3.5)
+  "src/lib/auth/invite-acceptance.ts",
+  "src/repositories/invitation-acceptance.repository.core.ts",
+  "src/services/invitation-acceptance.service.core.ts",
+]) {
   const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -31,7 +39,7 @@ for (const rel of ["src/types/user.ts", "src/lib/auth/profile-role.ts", "src/lib
 const tests = fs.readdirSync(here).filter((f) => f.endsWith(".test.mjs")).map((f) => path.join(here, f));
 const result = spawnSync(process.execPath, ["--test", ...tests], {
   stdio: "inherit",
-  env: { ...process.env, AUTH_LIB: pathToFileURL(path.join(out, "lib/auth")).href },
+  env: { ...process.env, AUTH_LIB: pathToFileURL(path.join(out, "lib/auth")).href, AUTH_BUILD: pathToFileURL(out).href },
 });
 fs.rmSync(out, { recursive: true, force: true });
 process.exit(result.status ?? 1);

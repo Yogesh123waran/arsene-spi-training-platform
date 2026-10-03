@@ -1704,6 +1704,11 @@ export type Database = {
         Args: { p_invitation_id: string; p_sent: boolean; p_auth_user_id?: string | null };
         Returns: Json;
       };
+      /** 0017, the invitee's own session: activate the invited account. Returns { ok, role?, enrolled?, reason? }. */
+      accept_user_invitation: {
+        Args: Record<string, never>;
+        Returns: Json;
+      };
     };
     Enums: {
       app_role: AppRoleColumn;
