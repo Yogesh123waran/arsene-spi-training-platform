@@ -441,10 +441,13 @@ test("Super Admin enrolment: enrol / withdraw / re-enrol / complete with history
   assert.deepEqual(await call(sa, "admin_set_enrollment", { p_batch_id: U.um_BC, p_student_id: U.um_S4, p_status: "enrolled" }), { ok: false, reason: "batch_not_current" });
   assert.deepEqual(await call(sa, "admin_set_enrollment", { p_batch_id: U.um_BF, p_student_id: U.um_S4, p_status: "enrolled" }), { ok: false, reason: "batch_full" });
   assert.deepEqual(await call(sa, "admin_set_enrollment", { p_batch_id: randomUUID(), p_student_id: U.um_S4, p_status: "enrolled" }), { ok: false, reason: "not_found" });
-  // Any other writer is recorded too (existing Super Admin RLS path) — as 'direct'.
-  await as("um_SA").execute(`update public.batch_students set enrollment_status = 'withdrawn' where batch_id = '${U.um_BX}' and student_id = '${U.um_S2}'`);
-  assert.deepEqual((await enrolEvents("um_BX", "um_S2")).at(-1), { prev: "enrolled", new: "withdrawn", actor: U.um_SA, source: "direct", reason: null });
-  await as("um_SA").execute(`update public.batch_students set enrollment_status = 'enrolled' where batch_id = '${U.um_BX}' and student_id = '${U.um_S2}'`);
+  // 0023 (G1): a Super Admin can no longer write enrolments directly (PostgREST) — only through the functions.
+  const historyBefore = await enrolEvents("um_BX", "um_S2");
+  const direct = await as("um_SA").execute(`update public.batch_students set enrollment_status = 'withdrawn' where batch_id = '${U.um_BX}' and student_id = '${U.um_S2}'`);
+  assert.equal(direct.error?.code, "42501", "direct Super Admin update refused");
+  assert.match(direct.error.message, /permission denied for table batch_students/);
+  assert.equal(await enrolment("um_BX", "um_S2"), "enrolled", "status unchanged");
+  assert.deepEqual(await enrolEvents("um_BX", "um_S2"), historyBefore, "no history row");
   // A non-status update writes no history row.
   const before = (await enrolEvents("um_BX", "um_S2")).length;
   await db.run(`update public.batch_students set updated_at = now() where batch_id = '${U.um_BX}' and student_id = '${U.um_S2}';`);
