@@ -12,7 +12,16 @@ import ts from "typescript";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "../..");
 const out = fs.mkdtempSync(path.join(os.tmpdir(), "batches-tests-"));
-for (const rel of ["src/types/batch.ts", "src/types/auth.ts", "src/types/user.ts", "src/lib/batches/create-batch.ts"]) {
+for (const rel of [
+  "src/types/batch.ts",
+  "src/types/auth.ts",
+  "src/types/user.ts",
+  "src/lib/batches/create-batch.ts",
+  // Batch trainer assignment (Phase 7 P3.6)
+  "src/lib/batches/assign-trainer.ts",
+  "src/repositories/batch-trainer.repository.core.ts",
+  "src/services/batch-trainer.service.core.ts",
+]) {
   const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
   }).outputText;
@@ -31,7 +40,7 @@ for (const rel of ["src/types/batch.ts", "src/types/auth.ts", "src/types/user.ts
 const tests = fs.readdirSync(here).filter((f) => f.endsWith(".test.mjs")).map((f) => path.join(here, f));
 const result = spawnSync(process.execPath, ["--test", ...tests], {
   stdio: "inherit",
-  env: { ...process.env, BATCHES_CORE: pathToFileURL(path.join(out, "lib/batches/create-batch.mjs")).href },
+  env: { ...process.env, BATCHES_CORE: pathToFileURL(path.join(out, "lib/batches/create-batch.mjs")).href, BATCHES_BUILD: pathToFileURL(out).href },
 });
 fs.rmSync(out, { recursive: true, force: true });
 process.exit(result.status ?? 1);

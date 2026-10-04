@@ -2,6 +2,7 @@ import "server-only";
 import { authConfig } from "@/config/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { batchTableRows, getBatchesForTrainer } from "@/lib/mock/batches-table.mock";
+import { isTrainerAvailable } from "@/lib/batches/assign-trainer";
 import type { BatchSummary, CreateBatchInput } from "@/types/batch";
 
 /**
@@ -28,10 +29,13 @@ export const BATCH_TRAINER_NOT_ASSIGNED = "Trainer not assigned";
 export class BatchRepositoryError extends Error {
   /** Postgres error code, when the database raised one. */
   readonly code: string;
-  constructor(message: string = GENERIC_DB_ERROR, code = "") {
+  /** Postgres hint, when the database set a machine-readable one (0021: "trainer_not_available"). */
+  readonly hint: string;
+  constructor(message: string = GENERIC_DB_ERROR, code = "", hint = "") {
     super(message);
     this.name = "BatchRepositoryError";
     this.code = code;
+    this.hint = hint;
   }
 }
 
@@ -52,9 +56,9 @@ const DEMO_TRAINER_NAME = "Rajesh Kumar";
  * withdrawn rows for admins too.
  */
 const BATCH_LIST_SELECT = `
-  id, name, status, start_date, end_date, max_seats,
+  id, name, status, start_date, end_date, max_seats, trainer_id,
   courses ( title ),
-  trainers ( full_name ),
+  trainers ( full_name, status, profiles ( role, account_status ) ),
   batch_students ( student_id, enrollment_status )
 `;
 
@@ -86,6 +90,15 @@ export const batchesRepository = {
         name: row.name,
         course: row.courses?.title ?? "",
         trainer: row.trainers?.full_name ?? BATCH_TRAINER_NOT_ASSIGNED,
+        trainerId: row.trainer_id,
+        // The Super Admin reads every trainer and profile; a trainer reads only their own.
+        trainerUnavailable:
+          row.trainer_id !== null &&
+          !isTrainerAvailable({
+            status: row.trainers?.status,
+            role: row.trainers?.profiles?.role,
+            accountStatus: row.trainers?.profiles?.account_status,
+          }),
         // Seats in use: distinct students whose enrolment isn't
         // withdrawn (enrolled + completed) — the same rule as the
         // database's max_seats capacity trigger.
@@ -116,7 +129,7 @@ export const batchesRepository = {
     const supabase = await createSupabaseServerClient();
     if (!supabase) throw new BatchRepositoryError();
 
-    let result: { data: { id: string } | null; error: { code?: string; message?: string } | null };
+    let result: { data: { id: string } | null; error: { code?: string; message?: string; hint?: string | null } | null };
     try {
       result = await supabase
         .from("batches")
@@ -139,7 +152,7 @@ export const batchesRepository = {
     }
     if (result.error || !result.data) {
       logDbError("create failed", result.error ? `${result.error.code ?? ""} ${result.error.message ?? ""}` : "no row returned");
-      throw new BatchRepositoryError("We couldn't create the batch. Please try again.", result.error?.code ?? "");
+      throw new BatchRepositoryError("We couldn't create the batch. Please try again.", result.error?.code ?? "", result.error?.hint ?? "");
     }
     return result.data.id;
   },

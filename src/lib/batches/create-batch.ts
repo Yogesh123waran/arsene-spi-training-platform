@@ -88,17 +88,21 @@ export function validateCreateBatchInput(
 /** A repository failure the create flow understands. */
 export interface BatchInsertFailure {
   /** "duplicate_code": the batch code already exists (unique constraint). */
-  kind: "duplicate_code" | "invalid_reference" | "rejected" | "permission" | "unavailable";
+  kind: "duplicate_code" | "invalid_reference" | "rejected" | "permission" | "unavailable" | "trainer_unavailable";
 }
 
 /**
  * What an insert failure means, from the Postgres code the repository
  * keeps on its error: 23505 unique (batch code taken) · 23503 foreign
  * key (course/trainer gone) · 23514/23502/22007/22008 check, not-null or
- * date · 42501 RLS / permission. Anything else is unexpected.
+ * date · 42501 RLS / permission. Anything else is unexpected. The 0021
+ * guard refuses an unavailable trainer with 23514 + hint
+ * "trainer_not_available" (checked first).
  */
 export function classifyBatchInsertError(error: unknown): BatchInsertFailure["kind"] | null {
   const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
+  const hint = error && typeof error === "object" && "hint" in error ? String((error as { hint?: unknown }).hint ?? "") : "";
+  if (code === "23514" && hint === "trainer_not_available") return "trainer_unavailable";
   if (code === "23505") return "duplicate_code";
   if (code === "23503") return "invalid_reference";
   if (code === "23514" || code === "23502" || code === "22007" || code === "22008") return "rejected";
@@ -134,6 +138,10 @@ export async function createBatchWith(deps: CreateBatchDeps, input: Partial<Crea
     switch (deps.classify(err)) {
       case "duplicate_code":
         throw new BatchCreateValidationError({ batchCode: "A batch with this code already exists. Use a different code." });
+      case "trainer_unavailable":
+        throw new BatchCreateValidationError({
+          trainerId: "This trainer isn't available (an active trainer with an active account is required). Choose another trainer or leave it unassigned.",
+        });
       case "invalid_reference":
         throw new BatchCreateValidationError({ form: "The selected course or trainer no longer exists. Reload the page and try again." });
       case "rejected":

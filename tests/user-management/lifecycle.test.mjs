@@ -67,7 +67,7 @@ test("role details: a new record needs only a full name; a code is never sent (g
 });
 
 const studentContact = { kind: "student", fields: { fullName: "Asha Rao", phone: "123", organization: "Org", designation: null } };
-const trainerContact = { kind: "trainer", fields: { fullName: "Tara", phone: null, specializations: ["PLC", "DCS"], bio: null } };
+const trainerContact = { kind: "trainer", fields: { fullName: "Tara", phone: null, organization: null, designation: null, specializations: ["PLC", "DCS"], bio: null } };
 
 test("details patch: only changed fields (an unchanged form writes and audits nothing)", () => {
   assert.deepEqual(L.buildDetailsPatch(studentContact, { fullName: "Asha Rao", phone: "123", organization: "Org", designation: "" }), { ok: true, value: {} });
@@ -87,6 +87,22 @@ test("details patch: required name, length caps and list shape are enforced", ()
   assert.equal(L.buildDetailsPatch(studentContact, { fullName: "A", phone: "1".repeat(41) }).ok, false);
   assert.equal(L.buildDetailsPatch(studentContact, { fullName: "A", organization: "o".repeat(201) }).ok, false);
   assert.equal(L.buildDetailsPatch(trainerContact, { fullName: "A", bio: "b".repeat(2001) }).ok, false);
+});
+
+test("details patch: trainer organization/designation (0022) — same rules as the student's", () => {
+  // Set: trimmed, sent with the 0022 function keys.
+  assert.deepEqual(L.buildDetailsPatch(trainerContact, { fullName: "Tara", organization: "  Acme Corp ", designation: "Lead Trainer" }), { ok: true, value: { organization: "Acme Corp", designation: "Lead Trainer" } });
+  // Unchanged: nothing sent, nothing audited.
+  const filled = { kind: "trainer", fields: { ...trainerContact.fields, organization: "Acme", designation: "Lead" } };
+  assert.deepEqual(L.buildDetailsPatch(filled, { fullName: "Tara", organization: "Acme", designation: "Lead", specializations: ["PLC", "DCS"] }), { ok: true, value: {} });
+  // Blank → null (cleared).
+  assert.deepEqual(L.buildDetailsPatch(filled, { fullName: "Tara", organization: "   ", designation: "" }), { ok: true, value: { organization: null, designation: null } });
+  // 200 is allowed; over 200 is refused.
+  assert.equal(L.buildDetailsPatch(trainerContact, { fullName: "Tara", organization: "o".repeat(200) }).ok, true);
+  assert.equal(L.buildDetailsPatch(trainerContact, { fullName: "Tara", organization: "o".repeat(201) }).ok, false);
+  assert.equal(L.buildDetailsPatch(trainerContact, { fullName: "Tara", designation: "d".repeat(201) }).ok, false);
+  // Students unchanged; a student form still never sends trainer-only fields.
+  assert.deepEqual(L.buildDetailsPatch(studentContact, { fullName: "Asha Rao", phone: "123", organization: "Org", designation: "Eng", bio: "x", specializations: ["y"] }), { ok: true, value: { designation: "Eng" } });
   assert.equal(L.buildDetailsPatch(trainerContact, { fullName: "A", specializations: "PLC" }).ok, false);
   assert.equal(L.buildDetailsPatch(trainerContact, { fullName: "A", specializations: Array.from({ length: 21 }, (_, i) => `s${i}`) }).ok, false);
   assert.equal(L.buildDetailsPatch(trainerContact, { fullName: "A", specializations: ["x".repeat(101)] }).ok, false);
@@ -144,7 +160,9 @@ test("action hints: never on your own account; follow the database's transitions
   assert.deepEqual([otherAdmin.actions.suspend, otherAdmin.actions.changeRole], [true, true]);
   // Records: the trainer's student record (old role) is not editable here; contact comes from the current role only.
   const rc = detail({ role: "trainer", trainers: { trainer_code: "T1", full_name: "Tara", status: "active", trainer_details: [{ email: "t@x", phone: null, specializations: null, bio: "b" }], batches: [] } });
-  assert.deepEqual(rc.contact, { kind: "trainer", fields: { fullName: "Tara", phone: null, specializations: [], bio: "b" } });
+  assert.deepEqual(rc.contact, { kind: "trainer", fields: { fullName: "Tara", phone: null, organization: null, designation: null, specializations: [], bio: "b" } });
+  const withOrg = detail({ role: "trainer", trainers: { trainer_code: "T1", full_name: "Tara", status: "active", trainer_details: [{ email: "t@x", phone: null, organization: "Acme", designation: "Lead", specializations: ["PLC"], bio: null }], batches: [] } });
+  assert.deepEqual([withOrg.contact.fields.organization, withOrg.contact.fields.designation], ["Acme", "Lead"], "trainer organization/designation read from trainer_details (0022)");
   assert.equal(rc.hasStudentRecord, true);
   assert.equal(rc.hasTrainerRecord, true);
 });

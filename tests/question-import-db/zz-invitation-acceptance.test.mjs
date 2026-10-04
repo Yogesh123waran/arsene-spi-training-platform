@@ -2,7 +2,7 @@
 // unchanged) through the real repository/service modules. Each invitee uses its OWN session
 // client (authenticated, its own user id); Supabase Auth itself (verifyOtp / updateUser /
 // signOut) is a recording stand-in, since only the database decides activation.
-import { before, test } from "node:test";
+import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
 import { clientFor, db, ids } from "./harness.mjs";
 
@@ -58,15 +58,28 @@ const quiet = async (fn) => {
 
 before(async () => {
   await db.exec(`
-    insert into t.ids (k, v) select 'ia_' || k, gen_random_uuid() from unnest(array['SEAT','BF','BO']) k;
-    insert into auth.users (id, email) values (t.id('ia_SEAT'), 'ia.seat@ia.test');
-    update public.profiles set account_status = 'active' where id = t.id('ia_SEAT');
+    insert into t.ids (k, v) select 'ia_' || k, gen_random_uuid() from unnest(array['SEAT','BTR','BF','BO']) k;
+    insert into auth.users (id, email) values (t.id('ia_SEAT'), 'ia.seat@ia.test'), (t.id('ia_BTR'), 'ia.batch-trainer@ia.test');
+    update public.profiles set account_status = 'active' where id in (t.id('ia_SEAT'), t.id('ia_BTR'));
+    update public.profiles set role = 'trainer' where id = t.id('ia_BTR');
     insert into public.students (id, student_code, full_name) values (t.id('ia_SEAT'), 'IA-SEAT', 'Seat Holder');
+    -- This file's own trainer: the shared seed trainers (T1…) are asserted on by other files.
+    insert into public.trainers (id, trainer_code, full_name) values (t.id('ia_BTR'), 'IA-BTR', 'IA Batch Trainer');
     insert into public.batches (id, batch_code, course_id, trainer_id, name, start_date, end_date, status, max_seats) values
-      (t.id('ia_BF'), 'IA-BF', t.id('C1'), t.id('T1'), 'IA full',    '2026-01-01', '2026-12-31', 'ongoing', 1),
-      (t.id('ia_BO'), 'IA-BO', t.id('C1'), t.id('T1'), 'IA ongoing', '2026-01-01', '2026-12-31', 'ongoing', 10);
+      (t.id('ia_BF'), 'IA-BF', t.id('C1'), t.id('ia_BTR'), 'IA full',    '2026-01-01', '2026-12-31', 'ongoing', 1),
+      (t.id('ia_BO'), 'IA-BO', t.id('C1'), t.id('ia_BTR'), 'IA ongoing', '2026-01-01', '2026-12-31', 'ongoing', 10);
     insert into public.batch_students (batch_id, student_id) values (t.id('ia_BF'), t.id('ia_SEAT'));`, ids.A);
   U = await db.admin("select json_object_agg(k, v) from t.ids");
+});
+
+// The database is shared with the files that follow (e.g. zz-users-read lists every profile):
+// leave no invited account without a domain record behind. Accounts that never acted (no audit
+// row references them) are removed; the others finish their real recovery path in the tests.
+after(async () => {
+  await db.exec(`delete from auth.users where id in (select v from t.ids where k in ('ia_OTHER', 'ia_BOUNDX', 'ia_BOUNDTO'));`);
+  const left = await db.admin(`select count(*) from public.profiles p join t.ids i on i.v = p.id
+    where i.k like 'ia\_%' and p.account_status = 'invited'`);
+  assert.equal(left, 0, "no invited accounts left behind by this file");
 });
 
 test("the invitee's own session: password, then accept_user_invitation, then the database role's portal; enrolled; replay changes nothing", async () => {
@@ -128,6 +141,17 @@ test("expired and revoked invitations never activate: mapped message, signed out
   assert.deepEqual(await quiet(() => f.service.completeInvitation(PASSWORD, PASSWORD)), { ok: false, error: lib.ACCEPT_REASON_MESSAGE.not_pending, ended: true });
   assert.deepEqual(await profile("ia_REV"), { role: "student", account_status: "invited" });
   assert.equal((await invitation(rv.invitation_id)).status, "revoked");
+
+  // Recovery: the unaccepted placeholder may be invited again (0019 D1) and then accepts normally.
+  for (const [key, email] of [["ia_EXP", "ia.expired@ia.test"], ["ia_REV", "ia.revoked@ia.test"]]) {
+    const again = await invite(email);
+    assert.equal(again.ok, true, `${key}: re-invited`);
+    assert.deepEqual(await quiet(() => serviceFor(key, email).service.completeInvitation(PASSWORD, PASSWORD)), { ok: true, home: "/student" }, key);
+    assert.deepEqual(await profile(key), { role: "student", account_status: "active" });
+    assert.deepEqual(await invitation(again.invitation_id), { status: "accepted", accepted_user_id: U[key], auth_user_id: U[key] });
+  }
+  assert.equal((await invitation(ex.invitation_id)).status, "expired", "the old invitations keep their final state");
+  assert.equal((await invitation(rv.invitation_id)).status, "revoked");
 });
 
 test("an invitation bound to a different Auth account cannot be accepted by the address's current account", async () => {
@@ -159,4 +183,7 @@ test("anonymous callers cannot execute accept_user_invitation; an invalid passwo
   assert.equal((await service.completeInvitation("short", "short")).ok, false);
   assert.deepEqual(calls, [], "no Auth call, no RPC");
   assert.deepEqual(await profile("ia_WEAK"), { role: "student", account_status: "invited" });
+  // Corrected password: accepted.
+  assert.deepEqual(await quiet(() => service.completeInvitation(PASSWORD, PASSWORD)), { ok: true, home: "/student" });
+  assert.deepEqual(await profile("ia_WEAK"), { role: "student", account_status: "active" });
 });

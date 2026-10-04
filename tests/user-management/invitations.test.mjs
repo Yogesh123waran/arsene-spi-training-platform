@@ -469,10 +469,14 @@ test("actions: the role is fixed server-side and only that kind's fields are for
     });
     await actions.inviteStudentAction("not an object");
     await actions.inviteTrainerAction(null);
-    const [student, trainer, junk1, junk2] = service.received.map((r) => r.input);
+    await actions.inviteTrainerAction({ email: "t2@x.test", fullName: "T2" });
+    const [student, trainer, junk1, junk2, plainTrainer] = service.received.map((r) => r.input);
     // No code is ever forwarded — the database generates it (0020).
     assert.deepEqual(student, { role: "student", email: "s@x.test", fullName: "S", phone: "1", organization: "O", designation: "D", batchId: ID });
-    assert.deepEqual(trainer, { role: "trainer", email: "t@x.test", fullName: "T", phone: "2", specializations: ["PLC"] });
+    // Trainers: organization/designation are forwarded (0022); batch, codes and role are still dropped.
+    assert.deepEqual(trainer, { role: "trainer", email: "t@x.test", fullName: "T", phone: "2", organization: "O", designation: "D", specializations: ["PLC"] });
+    // Without them, nothing extra is sent (the payload builder leaves them out; the database stores null).
+    assert.deepEqual(Object.fromEntries(Object.entries(plainTrainer).filter(([, v]) => v !== undefined)), { role: "trainer", email: "t2@x.test", fullName: "T2" });
     assert.equal(junk1.role, "student");
     assert.equal(junk2.role, "trainer");
     for (const input of [junk1, junk2]) assert.equal(Object.values(input).filter((v) => v !== undefined).length, 1, "nothing but the role");

@@ -226,7 +226,8 @@ test("last active Super Admin: a concurrent mutual suspension leaves exactly one
   assert.equal(r.code, 0, r.stderr);
   const files = [
     path.join(here, "fixtures/bootstrap.sql"),
-    ...fs.readdirSync(MIGRATIONS).filter((f) => /^00(0\d|1[0-8])_.*\.sql$/.test(f)).sort().map((f) => path.join(MIGRATIONS, f)),
+    // Through 0022: the current users repository reads this database (it selects columns added up to 0022).
+    ...fs.readdirSync(MIGRATIONS).filter((f) => /^00(0\d|1\d|2[0-2])_.*\.sql$/.test(f)).sort().map((f) => path.join(MIGRATIONS, f)),
     path.join(here, "fixtures/seed.sql"),
   ];
   for (const f of files) {
@@ -342,6 +343,13 @@ test("0018 upgrade: an account suspended from invited under 0017 can never be re
       join lateral (select ev.detail from public.user_admin_events ev where ev.target_user_id = p.id and ev.event_type = 'account_status_changed' order by ev.id desc limit 1) e on true
      where p.account_status = 'suspended' and e.detail ->> 'from' = 'invited'`);
   assert.deepEqual(flagged, [P.UP_INV]);
+
+  // The 0017 → 0018 upgrade above is the scenario under test; the current users repository used below
+  // reads columns added by later migrations, so bring this database to the current schema first (0019–0022).
+  for (const f of fs.readdirSync(MIGRATIONS).filter((x) => /^00(19|2[0-2])_.*\.sql$/.test(x)).sort()) {
+    r = await up.run(read(path.join(MIGRATIONS, f)));
+    assert.equal(r.code, 0, `${f}: ${r.stderr}`);
+  }
 
   // After 0018: reactivation of the never-activated account is refused (safe message), nothing written.
   const svc = serviceAs(up, P.A);

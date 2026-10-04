@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/Button";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { BatchesTable } from "@/components/modules/BatchesTable";
 import { batchesService } from "@/services/batches.service";
+import { batchTrainerService } from "@/services/batch-trainer.service";
+import type { AvailableTrainerOption } from "@/lib/batches/assign-trainer";
 import type { BatchSummary } from "@/types/batch";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +20,14 @@ export default async function AdminBatchesPage() {
   } catch (err) {
     console.error("[admin/batches] load failed:", err instanceof Error ? err.message : err);
     loadError = "We couldn't load the batches. Please try again.";
+  }
+
+  // Trainers that may be assigned (P3.6). If this fails, the dialog simply offers none.
+  let trainers: AvailableTrainerOption[] = [];
+  try {
+    trainers = await batchTrainerService.listAvailableTrainers();
+  } catch (err) {
+    console.error("[admin/batches] trainer options failed:", err instanceof Error ? err.name : "unknown error");
   }
 
   return (
@@ -36,7 +46,7 @@ export default async function AdminBatchesPage() {
       {loadError ? (
         <ErrorState title="We couldn't load the batches" description={loadError} />
       ) : (
-        <BatchesTable rows={batches} />
+        <BatchesTable rows={batches} assignment={{ trainers }} />
       )}
     </div>
   );

@@ -61,6 +61,14 @@ export interface BatchSummary {
   course: string;
   /** Assigned trainer's name, or "Trainer not assigned". */
   trainer: string;
+  /** Assigned trainer's id (Supabase mode); null when none is assigned. */
+  trainerId?: string | null;
+  /**
+   * True when a trainer is assigned but is no longer available (inactive
+   * record, not a trainer, or an invited/suspended account) — shown so a
+   * Super Admin can reassign the batch.
+   */
+  trainerUnavailable?: boolean;
   /** Distinct students whose enrolment isn't withdrawn (enrolled + completed) — the seats in use. */
   students: number;
   maxSeats: number;

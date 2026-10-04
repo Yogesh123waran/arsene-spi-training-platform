@@ -168,6 +168,8 @@ export function InviteUserDialog({
             email: d.email,
             fullName: d.fullName,
             phone: d.phone,
+            organization: d.organization,
+            designation: d.designation,
             specializations: d.specializations.split(",").map((s) => s.trim()).filter(Boolean),
           })
     );
@@ -263,10 +265,10 @@ export function InviteUserDialog({
         <Input name="email" type="email" label="Email" value={draft.email} onChange={set("email")} error={fieldErrors.email} maxLength={254} required disabled={busy} autoComplete="off" />
         <Input name="fullName" label="Full name" value={draft.fullName} onChange={set("fullName")} maxLength={200} required disabled={busy} />
         <Input name="phone" label="Phone (optional)" value={draft.phone} onChange={set("phone")} maxLength={40} disabled={busy} />
+        <Input name="organization" label="Organization (optional)" value={draft.organization} onChange={set("organization")} maxLength={200} disabled={busy} />
+        <Input name="designation" label="Designation (optional)" value={draft.designation} onChange={set("designation")} maxLength={200} disabled={busy} />
         {isStudent ? (
           <>
-            <Input name="organization" label="Organization (optional)" value={draft.organization} onChange={set("organization")} maxLength={200} disabled={busy} />
-            <Input name="designation" label="Designation (optional)" value={draft.designation} onChange={set("designation")} maxLength={200} disabled={busy} />
             <div className="sm:col-span-2">
               <Select
                 name="batchId"

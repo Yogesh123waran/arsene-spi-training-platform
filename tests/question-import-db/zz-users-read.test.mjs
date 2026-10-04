@@ -141,8 +141,10 @@ test("5. a suspended Super Admin cannot obtain Users data (session lookup refuse
 
 test("6. profiles without a domain record stay visible to the Super Admin", async () => {
   const svc = serviceForSession(W.ur_SA);
-  const missing = await svc.listUsers({ record: "missing" });
-  const orphan = missing.rows.find((r) => r.id === W.ur_ORPHAN);
+  // Every page: profiles without a name sort last by id, so the orphan's page depends on the other
+  // record-less profiles already in the shared test database.
+  const { first: missing, rows: missingRows } = await allPages(svc, { record: "missing" });
+  const orphan = missingRows.find((r) => r.id === W.ur_ORPHAN);
   assert.ok(orphan, "invited profile with no student record is listed");
   assert.deepEqual([orphan.role, orphan.accountStatus, orphan.recordState, orphan.name, orphan.email], ["student", "invited", "missing", null, null]);
   assert.equal(missing.totals.missingRecord, missing.matching);

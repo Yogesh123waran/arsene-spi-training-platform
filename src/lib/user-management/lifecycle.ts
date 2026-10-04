@@ -14,7 +14,6 @@
 import type { AppRoleColumn, Json } from "@/lib/supabase/types";
 import type { UserRole } from "@/types/user";
 import type {
-  StudentDetailFields,
   TrainerDetailFields,
   UserActionAvailability,
   UserAuditEntry,
@@ -61,7 +60,14 @@ export interface UserDetailRecord extends Omit<UserProfileRecord, "students" | "
   >;
   trainers: OneOrMany<
     Omit<UserTrainerRecord, "trainer_details"> & {
-      trainer_details: OneOrMany<{ email: string | null; phone: string | null; specializations: string[] | null; bio: string | null }>;
+      trainer_details: OneOrMany<{
+        email: string | null;
+        phone: string | null;
+        organization: string | null;
+        designation: string | null;
+        specializations: string[] | null;
+        bio: string | null;
+      }>;
     }
   >;
 }
@@ -143,15 +149,15 @@ export function buildDetailsPatch(contact: UserContactDetails, input: Record<str
   if (!phone.ok) return phone;
   if (!sameText(phone.value, contact.fields.phone)) patch.phone = phone.value;
 
-  if (contact.kind === "student") {
-    const current: StudentDetailFields = contact.fields;
-    const org = text(src.organization, "Organization", LIMITS.organization);
-    if (!org.ok) return org;
-    if (!sameText(org.value, current.organization)) patch.organization = org.value;
-    const des = text(src.designation, "Designation", LIMITS.designation);
-    if (!des.ok) return des;
-    if (!sameText(des.value, current.designation)) patch.designation = des.value;
-  } else {
+  // Organization and designation: the same rules for students and trainers (0022).
+  const org = text(src.organization, "Organization", LIMITS.organization);
+  if (!org.ok) return org;
+  if (!sameText(org.value, contact.fields.organization)) patch.organization = org.value;
+  const des = text(src.designation, "Designation", LIMITS.designation);
+  if (!des.ok) return des;
+  if (!sameText(des.value, contact.fields.designation)) patch.designation = des.value;
+
+  if (contact.kind === "trainer") {
     const current: TrainerDetailFields = contact.fields;
     const bio = text(src.bio, "Bio", LIMITS.bio);
     if (!bio.ok) return bio;
@@ -294,7 +300,17 @@ export function mapContactDetails(r: UserDetailRecord, user: UserSummary): UserC
     const t = one(r.trainers);
     if (!t) return null;
     const d = one(t.trainer_details);
-    return { kind: "trainer", fields: { fullName: t.full_name, phone: d?.phone ?? null, specializations: d?.specializations ?? [], bio: d?.bio ?? null } };
+    return {
+      kind: "trainer",
+      fields: {
+        fullName: t.full_name,
+        phone: d?.phone ?? null,
+        organization: d?.organization ?? null,
+        designation: d?.designation ?? null,
+        specializations: d?.specializations ?? [],
+        bio: d?.bio ?? null,
+      },
+    };
   }
   return null;
 }

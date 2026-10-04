@@ -74,6 +74,8 @@ export async function inviteTrainerAction(input: TrainerInvitationInput): Promis
       email: t.email,
       fullName: t.fullName,
       phone: t.phone,
+      organization: t.organization,
+      designation: t.designation,
       specializations: t.specializations,
     })
   );

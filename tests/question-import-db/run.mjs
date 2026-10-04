@@ -1,5 +1,5 @@
 // Bulk Question Import — repository/service integration tests against a
-// throwaway local PostgreSQL with migrations 0001–0020 (never Supabase).
+// throwaway local PostgreSQL with migrations 0001–0022 (never Supabase).
 //   PG_BIN="C:\Program Files\PostgreSQL\18\bin" node tests/question-import-db/run.mjs
 // Creates a temporary cluster, applies the Supabase role/auth stand-in
 // (fixtures/bootstrap.sql), every migration, and the seed; transpiles the
@@ -43,17 +43,17 @@ try {
   r = psql(["-d", "postgres", "-c", "create database qi_test"]);
   if (r.status !== 0) throw new Error(r.stderr);
 
-  // 2. Supabase stand-in, migrations 0001–0020, seed
+  // 2. Supabase stand-in, migrations 0001–0022, seed
   const files = [
     path.join(here, "fixtures/bootstrap.sql"),
-    ...fs.readdirSync(path.join(root, "supabase/migrations")).filter((f) => /^00(0\d|1\d|20)_.*\.sql$/.test(f)).sort().map((f) => path.join(root, "supabase/migrations", f)),
+    ...fs.readdirSync(path.join(root, "supabase/migrations")).filter((f) => /^00(0\d|1\d|2[0-2])_.*\.sql$/.test(f)).sort().map((f) => path.join(root, "supabase/migrations", f)),
     path.join(here, "fixtures/seed.sql"),
   ];
   for (const file of files) {
     r = psql(["-d", "qi_test", "-v", "ON_ERROR_STOP=1", "-f", file]);
     if (r.status !== 0) throw new Error(`${path.basename(file)} failed:\n${r.stderr}`);
   }
-  console.log(`database ready: ${files.length - 2} migrations (0001–0020) + seed`);
+  console.log(`database ready: ${files.length - 2} migrations (0001–0022) + seed`);
 
   // 3. Transpile the real modules under test
   const out = path.join(work, "build");
@@ -91,6 +91,10 @@ try {
     "src/lib/auth/invite-acceptance.ts",
     "src/repositories/invitation-acceptance.repository.core.ts",
     "src/services/invitation-acceptance.service.core.ts",
+    // Batch trainer assignment (Phase 7 P3.6)
+    "src/lib/batches/assign-trainer.ts",
+    "src/repositories/batch-trainer.repository.core.ts",
+    "src/services/batch-trainer.service.core.ts",
   ];
   for (const rel of sources) {
     const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {

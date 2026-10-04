@@ -2,6 +2,7 @@ import "server-only";
 import { authService } from "./auth.service";
 import { batchesRepository, BatchRepositoryError, type BatchScope } from "@/repositories/batches.repository";
 import { getClassFilterOptions } from "@/lib/classes/filter-options";
+import { batchTrainerRepository } from "@/repositories/batch-trainer.repository";
 import {
   BatchCreateAuthorizationError,
   BatchCreateValidationError,
@@ -52,11 +53,17 @@ async function requireUser(): Promise<AuthUser> {
 /**
  * Course and trainer choices for the Add Batch form — the same lists the
  * Classes form uses (published courses, active trainers), read with the
- * caller's own session.
+ * caller's own session. A trainer is selectable only if also available
+ * (trainer role, active account — P3.6); the database (0021) refuses an
+ * unavailable one regardless.
  */
 async function loadBatchFormOptions(): Promise<BatchFormOptions> {
-  const options = await getClassFilterOptions();
-  return { courses: options.courses, trainers: options.trainers };
+  const [options, available] = await Promise.all([getClassFilterOptions(), batchTrainerRepository.listAvailableTrainers()]);
+  const availableIds = new Set(available.map((t) => t.id));
+  return {
+    courses: options.courses,
+    trainers: options.trainers.map((t) => ({ ...t, selectable: t.selectable && availableIds.has(t.id) })),
+  };
 }
 
 export const batchesService = {

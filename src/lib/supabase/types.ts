@@ -156,6 +156,10 @@ export type TrainerDetailsRow = {
   trainer_id: string;
   email: string;
   phone: string | null;
+  /** 0022 */
+  organization: string | null;
+  /** 0022 */
+  designation: string | null;
   specializations: string[];
   bio: string | null;
   created_at: string;
@@ -166,6 +170,8 @@ export type TrainerDetailsInsert = {
   trainer_id: string;
   email: string;
   phone?: string | null;
+  organization?: string | null;
+  designation?: string | null;
   specializations?: string[];
   bio?: string | null;
   created_at?: string;
@@ -1687,6 +1693,11 @@ export type Database = {
       /** Name + contact details of a trainer. Returns { ok, reason?, fields? }. */
       admin_update_trainer: {
         Args: { p_trainer_id: string; p: Json };
+        Returns: Json;
+      };
+      /** Assign/change a current batch's trainer (row lock, audited; 0021 refuses direct writes). Returns { ok, reason?, previous?, trainer_id? }. */
+      admin_assign_batch_trainer: {
+        Args: { p_batch_id: string; p_trainer_id: string };
         Returns: Json;
       };
       /** 0017 (address rule widened by 0019 D1). Returns { ok, invitation_id? , reason? }. */

@@ -196,8 +196,8 @@ function DetailsForm({ detail, onCancel }: { detail: UserDetail; onCancel: () =>
   const contact = detail.contact!;
   const [fullName, setFullName] = useState(contact.fields.fullName);
   const [phone, setPhone] = useState(contact.fields.phone ?? "");
-  const [organization, setOrganization] = useState(contact.kind === "student" ? (contact.fields.organization ?? "") : "");
-  const [designation, setDesignation] = useState(contact.kind === "student" ? (contact.fields.designation ?? "") : "");
+  const [organization, setOrganization] = useState(contact.fields.organization ?? "");
+  const [designation, setDesignation] = useState(contact.fields.designation ?? "");
   const [specializations, setSpecializations] = useState(contact.kind === "trainer" ? contact.fields.specializations.join(", ") : "");
   const [bio, setBio] = useState(contact.kind === "trainer" ? (contact.fields.bio ?? "") : "");
   const { isPending, run } = useLifecycleAction();
@@ -206,7 +206,7 @@ function DetailsForm({ detail, onCancel }: { detail: UserDetail; onCancel: () =>
     const details: Record<string, unknown> =
       contact.kind === "student"
         ? { fullName, phone, organization, designation }
-        : { fullName, phone, bio, specializations: specializations.split(",").map((s) => s.trim()).filter(Boolean) };
+        : { fullName, phone, organization, designation, bio, specializations: specializations.split(",").map((s) => s.trim()).filter(Boolean) };
     run(() => updateUserDetailsAction(detail.user.id, details), onCancel);
   };
 
@@ -221,12 +221,9 @@ function DetailsForm({ detail, onCancel }: { detail: UserDetail; onCancel: () =>
     >
       <Input name="fullName" label="Full name" value={fullName} onChange={(e) => setFullName(e.target.value)} maxLength={LIMITS.fullName} required />
       <Input name="phone" label="Phone" value={phone} onChange={(e) => setPhone(e.target.value)} maxLength={LIMITS.phone} />
-      {contact.kind === "student" ? (
-        <>
-          <Input name="organization" label="Organization" value={organization} onChange={(e) => setOrganization(e.target.value)} maxLength={LIMITS.organization} />
-          <Input name="designation" label="Designation" value={designation} onChange={(e) => setDesignation(e.target.value)} maxLength={LIMITS.designation} />
-        </>
-      ) : (
+      <Input name="organization" label="Organization" value={organization} onChange={(e) => setOrganization(e.target.value)} maxLength={LIMITS.organization} />
+      <Input name="designation" label="Designation" value={designation} onChange={(e) => setDesignation(e.target.value)} maxLength={LIMITS.designation} />
+      {contact.kind === "trainer" && (
         <>
           <Input name="specializations" label="Specializations" hint="Comma-separated (max 20)" value={specializations} onChange={(e) => setSpecializations(e.target.value)} />
           <label className="flex flex-col gap-1.5 sm:col-span-2">
@@ -259,6 +256,8 @@ function DetailsView({ detail }: { detail: UserDetail }) {
         ]
       : [
           ["Phone", c.fields.phone ?? "—"],
+          ["Organization", c.fields.organization ?? "—"],
+          ["Designation", c.fields.designation ?? "—"],
           ["Specializations", c.fields.specializations.length ? c.fields.specializations.join(", ") : "—"],
           ["Bio", c.fields.bio ?? "—"],
         ];

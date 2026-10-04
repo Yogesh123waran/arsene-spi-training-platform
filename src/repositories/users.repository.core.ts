@@ -67,7 +67,7 @@ export const USER_DETAIL_SELECT = `
     student_details ( email, phone, organization, designation ),
     batch_students ( enrollment_status, batches ( id, batch_code, name, status ) ) ),
   trainers!trainers_id_fkey ( trainer_code, full_name, status,
-    trainer_details ( email, phone, specializations, bio ),
+    trainer_details ( email, phone, organization, designation, specializations, bio ),
     batches ( id, batch_code, name, status ) )
 `;
 

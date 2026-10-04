@@ -119,6 +119,8 @@ export interface StudentDetailFields {
 export interface TrainerDetailFields {
   fullName: string;
   phone: string | null;
+  organization: string | null;
+  designation: string | null;
   specializations: string[];
   bio: string | null;
 }
@@ -222,6 +224,8 @@ export interface TrainerInvitationInput {
   email?: string;
   fullName?: string;
   phone?: string;
+  organization?: string;
+  designation?: string;
   specializations?: string[];
 }
 
