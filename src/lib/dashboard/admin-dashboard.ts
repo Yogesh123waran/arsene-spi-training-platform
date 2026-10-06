@@ -7,8 +7,7 @@
  * results). Nothing here invents trends, scores or "at-risk" rules.
  */
 import { isTrainerAvailable } from "@/lib/batches/assign-trainer";
-import { MODULE_STRONG_MIN, MODULE_WEAK_BELOW } from "@/types/performance";
-import { addDays, type Comparison } from "@/lib/dashboard/periods";
+import { addDays, type Comparison, type PeriodKey } from "@/lib/dashboard/periods";
 
 // -------------------------------------------------------------------
 // Time: the platform's day is India time (Asia/Kolkata), as for
@@ -31,7 +30,6 @@ export const UPCOMING_CLASS_LIMIT = 8;
 export const UPCOMING_TEST_LIMIT = 8;
 export const ACTIVITY_LIMIT = 8;
 export const COURSE_ACTIVITY_LIMIT = 6;
-export const WEAK_TOPIC_LIMIT = 5;
 export const PENDING_APPROVAL_LIMIT = 5;
 
 // -------------------------------------------------------------------
@@ -63,22 +61,32 @@ export interface DashboardMetrics {
 }
 
 // -------------------------------------------------------------------
-// Training health (D2a: trainer coverage and batch capacity)
+// Training health (D2a: trainer coverage and batch capacity; D2b-2A: the
+// four analytics indicators — see src/lib/dashboard/analytics.ts)
 // -------------------------------------------------------------------
 
 export type HealthStatus = "healthy" | "watch" | "attention";
+/** A line's status: a judgement, "No data" (nothing to judge) or "Unavailable" (its source could not be read). */
+export type HealthLineStatus = HealthStatus | "no_data" | "unavailable";
+export type HealthKey = "trainer_coverage" | "batch_capacity" | "attendance" | "assessment" | "assignments" | "students";
 
 export interface HealthLine {
-  key: "trainer_coverage" | "batch_capacity";
+  key: HealthKey;
   label: string;
-  status: HealthStatus;
+  status: HealthLineStatus;
   /** The database fact behind the status, in words. */
   reason: string;
   href: string;
   linkLabel: string;
 }
 
-export const HEALTH_LABEL: Record<HealthStatus, string> = { healthy: "Healthy", watch: "Watch", attention: "Attention" };
+export const HEALTH_LABEL: Record<HealthLineStatus, string> = {
+  healthy: "Healthy",
+  watch: "Watch",
+  attention: "Attention",
+  no_data: "No data",
+  unavailable: "Unavailable",
+};
 const HEALTH_RANK: Record<HealthStatus, number> = { healthy: 0, watch: 1, attention: 2 };
 
 /** Product decision Q2 — percentage thresholds (attendance 85 / 75; assessment and assignments 80 / 65). */
@@ -146,32 +154,15 @@ export interface TrainingOverview {
   coursesWithCurrentBatches: number;
 }
 
-export interface DashboardPerformance {
-  scopeLabel: string;
-  testAverage: number | null;
-  passRate: number | null;
-  releasedResults: number;
-  attendancePercent: number | null;
-  attendanceMarked: number;
-  assignmentAverage: number | null;
-  assignmentsScored: number;
-  trend: { label: string; title: string; value: number }[];
-  /** Weakest modules first (released results only; the performance page's bands), at most WEAK_TOPIC_LIMIT. */
-  topics: DashboardTopic[];
-  /** Modules with released results in scope. */
-  topicsAssessed: number;
-  /** Modules below the weak threshold. */
-  weakTopics: number;
-}
-
-export type TopicBand = "weak" | "developing" | "strong";
-
-export interface DashboardTopic {
-  moduleId: string;
-  title: string;
-  percent: number;
-  answers: number;
-  band: TopicBand;
+/** The selected reporting period (D2b-2A): India dates, both ends included. */
+export interface DashboardPeriod {
+  key: PeriodKey;
+  label: string;
+  from: string;
+  to: string;
+  /** The comparison period: the same number of India days immediately before (Q1). */
+  prevFrom: string;
+  prevTo: string;
 }
 
 /** A batch with completion recommendations waiting for a Super Admin decision. */
@@ -205,16 +196,16 @@ export interface AdminDashboardData {
   /** India-time date the dashboard was computed for (YYYY-MM-DD). */
   today: string;
   generatedAt: string;
+  /** The reporting period the analytics panels use (current-state sections ignore it). */
+  period: DashboardPeriod;
   metrics: DashboardSection<DashboardMetrics>;
   attention: DashboardSection<AttentionItem[]>;
   todayClasses: DashboardSection<{ total: number; classes: DashboardClass[] }>;
   upcomingClasses: DashboardSection<DashboardClass[]>;
   upcomingTests: DashboardSection<DashboardTest[]>;
   overview: DashboardSection<TrainingOverview>;
-  performance: DashboardSection<DashboardPerformance>;
   activity: DashboardSection<{ unreadCount: number; items: DashboardActivity[] }>;
   approvals: DashboardSection<PendingApprovals>;
-  health: DashboardSection<HealthLine[]>;
 }
 
 // -------------------------------------------------------------------
@@ -400,21 +391,6 @@ export function buildAttentionItems(f: AttentionFacts): AttentionItem[] {
     },
   ];
   return items.filter((i) => Number.isFinite(i.count) && i.count > 0);
-}
-
-/** The performance page's module bands: weak below 65 %, strong from 80 %. */
-export function topicBand(percent: number): TopicBand {
-  if (percent < MODULE_WEAK_BELOW) return "weak";
-  return percent >= MODULE_STRONG_MIN ? "strong" : "developing";
-}
-
-/** Weakest modules first (ties: fewer graded answers last, then title), bounded. */
-export function weakestTopics(modules: { moduleId: string; title: string; percent: number; answers: number }[]): DashboardTopic[] {
-  return [...modules]
-    .filter((m) => Number.isFinite(m.percent))
-    .sort((a, b) => a.percent - b.percent || b.answers - a.answers || a.title.localeCompare(b.title))
-    .slice(0, WEAK_TOPIC_LIMIT)
-    .map((m) => ({ moduleId: m.moduleId, title: m.title, percent: m.percent, answers: m.answers, band: topicBand(m.percent) }));
 }
 
 /** Batches with pending completion recommendations, most first, bounded. */

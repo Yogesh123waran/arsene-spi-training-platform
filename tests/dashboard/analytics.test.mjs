@@ -1,0 +1,178 @@
+// Dashboard D2b-2A — src/lib/dashboard/analytics.ts (pure): response validation against the 0024 contract,
+// the locked comparison rules (rates in percentage points; counts as % change / New / —), labels, topic
+// bands (Healthy / Watch / Attention), the four analytics health indicators and the overall line
+// (worst line wins, No data / Unavailable excluded, never a score), and the period-based read model.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { rawAnalytics } from "./analytics-fixture.mjs";
+
+const build = process.env.DASHBOARD_BUILD;
+const a = await import(`${build}/lib/dashboard/analytics.mjs`);
+const lib = await import(`${build}/lib/dashboard/admin-dashboard.mjs`);
+
+// ---------------------------------------------------------------- validation
+
+test("validation: the 0024 response parses to typed values; nulls stay null", () => {
+  const raw = a.parseAnalytics(rawAnalytics());
+  assert.equal(raw.period.bucket, "week");
+  assert.equal(raw.trend[1].test_avg, null, "a bucket without results keeps null");
+  assert.equal(raw.totals.previous.assignment_avg, null);
+  assert.equal(raw.topics[0].band, "attention");
+  assert.equal(raw.batches[0].prev_attendance_pct, null);
+  assert.equal(raw.health.reviews_waiting_over_7d, 2);
+});
+
+test("validation: anything outside the contract is rejected with AnalyticsShapeError naming the path — never cast", () => {
+  const bad = (mutate, path) => {
+    const r = rawAnalytics();
+    mutate(r);
+    assert.throws(() => a.parseAnalytics(r), (e) => e instanceof a.AnalyticsShapeError && e.path === path, path);
+  };
+  assert.throws(() => a.parseAnalytics(null), a.AnalyticsShapeError);
+  assert.throws(() => a.parseAnalytics([]), a.AnalyticsShapeError);
+  bad((r) => { r.period.bucket = "day"; }, "period.bucket");
+  bad((r) => { r.period.from = "2026-02-30"; }, "period.from");
+  bad((r) => { r.totals.current.results = -1; }, "totals.current.results");
+  bad((r) => { r.totals.current.results = 1.5; }, "totals.current.results");
+  bad((r) => { r.totals.current.test_avg = "78"; }, "totals.current.test_avg");
+  bad((r) => { r.trend = {}; }, "trend");
+  bad((r) => { r.topics[0].band = "weak"; }, "topics[0].band");
+  bad((r) => { r.topics[1].percent = Number.NaN; }, "topics[1].percent");
+  bad((r) => { delete r.health; }, "health");
+  bad((r) => { r.students.top[0].id = 7; }, "students.top[0].id");
+  bad((r) => { r.batches[0].students = null; }, "batches[0].students");
+});
+
+// ---------------------------------------------------------------- comparisons
+
+test("rates: percentage-point difference (78 % → 82 % = +4 pp), never a percent change", () => {
+  assert.deepEqual(a.ratePointChange(82, 78), { current: 82, previous: 78, points: 4, state: "change" });
+  assert.equal(a.formatPoints(a.ratePointChange(82, 78)), "+4 pp", "not +5.13 %");
+  assert.equal(a.formatPoints(a.ratePointChange(72, 78)), "−6 pp");
+  assert.equal(a.formatPoints(a.ratePointChange(81.25, 88)), "−6.8 pp", "half away from zero");
+  assert.equal(a.formatPoints(a.ratePointChange(80, 80)), "0 pp");
+  assert.deepEqual(a.ratePointChange(80, null), { current: 80, previous: null, points: null, state: "no_comparison" });
+  assert.equal(a.formatPoints(a.ratePointChange(80, null)), "No comparison data");
+  assert.deepEqual(a.ratePointChange(null, 80), { current: null, previous: 80, points: null, state: "no_data" });
+  assert.equal(a.formatPoints(a.ratePointChange(null, null)), "—");
+});
+
+test("counts: % change when previous > 0; 'New' from 0; '—' when both are 0", () => {
+  assert.deepEqual(a.countChange(24, 12), { current: 24, previous: 12, percent: 100, display: "+100%" });
+  assert.deepEqual(a.countChange(9, 12), { current: 9, previous: 12, percent: -25, display: "−25%" });
+  assert.deepEqual(a.countChange(12, 12), { current: 12, previous: 12, percent: 0, display: "0%" });
+  assert.deepEqual(a.countChange(5, 0), { current: 5, previous: 0, percent: null, display: "New" });
+  assert.deepEqual(a.countChange(0, 0), { current: 0, previous: 0, percent: null, display: "—" });
+  assert.equal(a.countChange(0, 4).display, "−100%");
+  assert.throws(() => a.countChange(-1, 2), RangeError);
+});
+
+test("progress percentages: null without a denominator (never 0 %)", () => {
+  assert.equal(a.progressPercent(3, 5), 60);
+  assert.equal(a.progressPercent(1, 3), 33.3);
+  assert.equal(a.progressPercent(0, 0), null);
+  assert.equal(a.progressPercent(2, 0), null);
+  assert.equal(a.formatPercent(null), "—");
+  assert.equal(a.formatPercent(81.25), "81.3%");
+});
+
+// ---------------------------------------------------------------- labels and periods
+
+test("labels: India calendar dates printed as written (no time-zone shift); week and month buckets", () => {
+  assert.equal(a.formatDateRange("2026-10-01", "2026-10-06"), "01 Oct – 06 Oct 2026");
+  assert.equal(a.formatDateRange("2025-12-28", "2026-01-03"), "28 Dec 2025 – 03 Jan 2026");
+  assert.equal(a.formatDateRange("2026-10-01", "2026-10-01"), "01 Oct 2026");
+  assert.equal(a.bucketLabel("2026-03-04", "2026-03-10", "week"), "04–10 Mar");
+  assert.equal(a.bucketLabel("2026-02-26", "2026-03-03", "week"), "26 Feb – 03 Mar");
+  assert.equal(a.bucketLabel("2026-03-01", "2026-03-01", "week"), "01 Mar");
+  assert.equal(a.bucketLabel("2026-03-01", "2026-03-31", "month"), "Mar 2026");
+});
+
+test("period key: the four supported values; anything else (missing, unknown, injected, repeated) → this_month or the first value", () => {
+  for (const k of ["this_month", "previous_month", "last_3_months", "last_6_months"]) assert.equal(a.resolvePeriodKey(k), k);
+  for (const v of [undefined, null, "", "all_time", "This_Month", "this_month' or 1=1", 3]) assert.equal(a.resolvePeriodKey(v), "this_month");
+  assert.equal(a.resolvePeriodKey(["last_3_months", "this_month"]), "last_3_months");
+});
+
+// ---------------------------------------------------------------- read model
+
+test("read model: four management-level figures with pp comparisons and their evidence; trend with gaps; topics with the locked bands", () => {
+  const p = a.buildAnalyticsPanels(a.parseAnalytics(rawAnalytics()), "this_month");
+  assert.deepEqual(p.period, { key: "this_month", label: "This month", from: "2026-10-01", to: "2026-10-06", prevFrom: "2026-09-25", prevTo: "2026-09-30", bucket: "week", rangeText: "01 Oct – 06 Oct 2026", prevRangeText: "25 Sept – 30 Sept 2026" }, "en-IN month names, as everywhere else in the app");
+  assert.deepEqual(p.performance.map((m) => [m.label, a.formatPoints(m.comparison), m.evidence.display, m.evidenceNoun]), [
+    ["Test average", "+6 pp", "+100%", "released results"],
+    ["Pass rate", "+5 pp", "+100%", "released results"],
+    ["Attendance", "−6.8 pp", "−20%", "attendance records"],
+    ["Assignment average", "No comparison data", "New", "scored submissions"],
+  ]);
+  assert.deepEqual(p.trend.map((t) => [t.label, t.testAvg, t.results]), [["01–04 Oct", 76.5, 9], ["05–06 Oct", null, 0]], "a bucket without results is a gap, not 0");
+  assert.deepEqual(p.topics.map((t) => [t.title, t.percent, t.answers, t.band]), [
+    ["Control Valve Sizing", 33.33, 6, "attention"], ["Loop Identification", 70, 5, "watch"], ["P&ID Reading", 91.67, 6, "healthy"],
+  ]);
+  assert.deepEqual(Object.values(a.TOPIC_BAND_LABEL), ["Healthy", "Watch", "Attention"], "no Weak / Developing / Strong");
+  assert.equal(p.hasActivity, true);
+  assert.equal(p.hasComparison, true);
+  assert.equal(p.resultsInPeriod, 24);
+  assert.deepEqual(Object.keys(p.datasets).sort(), ["batches", "batches_total", "courses", "courses_total", "delivery", "delivery_total", "enrolment", "enrolment_total", "students"]);
+  const j = JSON.stringify(p);
+  assert.doesNotMatch(j, /module_performance|strongModules|weakModules|studentResults|filters/, "no Performance-page detail duplicated");
+});
+
+test("read model: an empty period has no activity and no invented figures; the comparison period is reported separately", () => {
+  const empty = { test_avg: null, pass_rate: null, results: 0, attendance_pct: null, attendance_marked: 0, assignment_avg: null, assignments_scored: 0 };
+  const r = rawAnalytics({ totals: { current: { ...empty }, previous: { ...empty } }, topics: [] });
+  const p = a.buildAnalyticsPanels(a.parseAnalytics(r), "previous_month");
+  assert.equal(p.period.label, "Previous month");
+  assert.equal(p.hasActivity, false);
+  assert.equal(p.hasComparison, false);
+  assert.ok(p.performance.every((m) => m.comparison.state === "no_data" && m.comparison.current === null && m.evidence.display === "—"));
+  assert.deepEqual(p.topics, [], "insufficient topic evidence → none listed (the panel says Insufficient data)");
+});
+
+// ---------------------------------------------------------------- health
+
+const H = (o = {}) => ({ attendance_n: 40, attendance_pct: 90, results_n: 20, test_avg: 85, assignments_n: 10, assignment_avg: 85, students_assessed: 12, students_below_75: 0, reviews_waiting_over_7d: 0, ...o });
+const status = (line) => line.status;
+
+test("attendance indicator: Healthy ≥ 85, Watch ≥ 75, Attention < 75; No data below 5 records", () => {
+  assert.deepEqual([85, 84.99, 75, 74.99].map((v) => status(a.attendanceHealth(H({ attendance_pct: v })))), ["healthy", "watch", "watch", "attention"]);
+  assert.equal(status(a.attendanceHealth(H({ attendance_pct: null, attendance_n: 3 }))), "no_data");
+  assert.match(a.attendanceHealth(H({ attendance_pct: null, attendance_n: 3 })).reason, /n = 3/);
+  assert.match(a.attendanceHealth(H({ attendance_pct: null, attendance_n: 0 })).reason, /No attendance recorded/);
+});
+
+test("assessment indicator: Healthy ≥ 80, Watch ≥ 65, Attention < 65; No data without 5 results", () => {
+  assert.deepEqual([80, 79.99, 65, 64.99].map((v) => status(a.assessmentHealth(H({ test_avg: v })))), ["healthy", "watch", "watch", "attention"]);
+  assert.equal(status(a.assessmentHealth(H({ test_avg: null, results_n: 4 }))), "no_data");
+});
+
+test("assignments indicator: Healthy ≥ 80, Watch ≥ 65, Attention < 65; at least Watch while reviews wait > 7 days", () => {
+  assert.deepEqual([80, 79.99, 65, 64.99].map((v) => status(a.assignmentsHealth(H({ assignment_avg: v })))), ["healthy", "watch", "watch", "attention"]);
+  assert.equal(status(a.assignmentsHealth(H({ assignment_avg: 90, reviews_waiting_over_7d: 1 }))), "watch", "healthy average + waiting → Watch");
+  assert.equal(status(a.assignmentsHealth(H({ assignment_avg: 50, reviews_waiting_over_7d: 3 }))), "attention", "worse band wins");
+  assert.match(a.assignmentsHealth(H({ assignment_avg: 90, reviews_waiting_over_7d: 2 })).reason, /2 submissions have waited more than 7 days/);
+  assert.equal(status(a.assignmentsHealth(H({ assignment_avg: null, assignments_n: 2, reviews_waiting_over_7d: 1 }))), "watch", "waiting is a fact even without an average");
+  assert.equal(status(a.assignmentsHealth(H({ assignment_avg: null, assignments_n: 0, reviews_waiting_over_7d: 0 }))), "no_data");
+});
+
+test("students indicator: Attention when any assessed enrolled student is below 75 %, with the count; No data when none assessed", () => {
+  const att = a.studentsHealth(H({ students_assessed: 12, students_below_75: 2 }));
+  assert.deepEqual([att.status, att.reason], ["attention", "2 of 12 enrolled students below 75% attendance in this period."]);
+  assert.equal(status(a.studentsHealth(H())), "healthy");
+  assert.equal(status(a.studentsHealth(H({ students_assessed: 0 }))), "no_data");
+});
+
+test("overall: worst line wins (Attention > Watch > Healthy); No data and Unavailable excluded; 'Based on X of 6'; never a score", () => {
+  const line = (key, s) => ({ key, label: key, status: s, reason: "r", href: "/admin", linkLabel: "l" });
+  const keys = ["trainer_coverage", "batch_capacity", "attendance", "assessment", "assignments", "students"];
+  const six = (...ss) => keys.map((k, i) => line(k, ss[i]));
+  assert.deepEqual(a.overallHealth(six("healthy", "healthy", "healthy", "healthy", "healthy", "healthy")), { status: "healthy", basedOn: 6, total: 6, drivers: [] });
+  assert.deepEqual(a.overallHealth(six("healthy", "watch", "healthy", "watch", "healthy", "healthy")), { status: "watch", basedOn: 6, total: 6, drivers: ["batch_capacity", "assessment"] });
+  assert.deepEqual(a.overallHealth(six("watch", "healthy", "attention", "no_data", "watch", "unavailable")), { status: "attention", basedOn: 4, total: 6, drivers: ["attendance"] }, "partial No data");
+  assert.deepEqual(a.overallHealth(six("no_data", "no_data", "no_data", "no_data", "no_data", "no_data")), { status: "no_data", basedOn: 0, total: 6, drivers: [] }, "all No data → No data, not a failure");
+  assert.ok(Object.values(a.overallHealth(six("watch", "watch", "watch", "watch", "watch", "watch"))).every((v) => typeof v !== "number" || Number.isInteger(v)), "counts only — no score");
+  assert.equal(a.HEALTH_INDICATOR_COUNT, 6);
+  assert.deepEqual(a.analyticsHealth(H()).map((l) => l.key), ["attendance", "assessment", "assignments", "students"]);
+  assert.deepEqual(a.unavailableAnalyticsHealth().map((l) => l.status), ["unavailable", "unavailable", "unavailable", "unavailable"]);
+  assert.deepEqual(Object.keys(lib.HEALTH_LABEL), ["healthy", "watch", "attention", "no_data", "unavailable"], "one health vocabulary");
+});

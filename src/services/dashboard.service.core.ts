@@ -1,12 +1,18 @@
 /**
- * Super Admin dashboard service (D1). The signed-in user comes from the
- * session, never from the browser; only a Super Admin gets the data
+ * Super Admin dashboard service (D1 / D2a / D2b-2A). The signed-in user comes
+ * from the session, never from the browser; only a Super Admin gets the data
  * (RoleGuard and middleware check the same before the page renders, and
  * RLS decides every row the repository reads).
  *
- * Sources: database counts and bounded reads (dashboard repository), the
- * Users page totals (users service), the existing performance summary
- * (performance service) and the Super Admin's own notification feed.
+ * Two independent results per request:
+ *   core       current-state sections (D1/D2a): database counts and bounded
+ *              reads, the Users page totals, the Super Admin's notification
+ *              feed, completion approvals.
+ *   analytics  the period-based panels (D2b-2A) from ONE call to
+ *              public.dashboard_analytics (0024), validated before use, plus
+ *              the six-line Training health. If the analytics fail, only the
+ *              analytics panels show their error state; health keeps its
+ *              current-state lines and marks the analytics lines Unavailable.
  * Sections load in parallel and independently: one failure shows that
  * section's error state, never a raw error, and never hides the others.
  */
@@ -24,22 +30,42 @@ import {
   trainerCoverageHealth,
   summarizeCurrentBatches,
   testState,
-  weakestTopics,
   type AdminDashboardData,
+  type CurrentBatchRecord,
   type DashboardClass,
-  type DashboardPerformance,
+  type DashboardPeriod,
   type DashboardSection,
   type DashboardTest,
+  type HealthLine,
 } from "@/lib/dashboard/admin-dashboard";
-import { addDays, compare, type Comparison } from "@/lib/dashboard/periods";
+import { PERIOD_LABEL, addDays, compare, periodRange, previousComparable, type Comparison, type PeriodKey } from "@/lib/dashboard/periods";
+import {
+  ANALYTICS_LIST_LIMIT,
+  analyticsHealth,
+  buildAnalyticsPanels,
+  parseAnalytics,
+  resolvePeriodKey,
+  trainingHealth,
+  unavailableAnalyticsHealth,
+  type AnalyticsPanels,
+  type DashboardAnalyticsResult,
+  type TrainingHealthView,
+} from "@/lib/dashboard/analytics";
 
 /** The look-back for "pending approvals vs 7 days ago" (an instant, 7 × 24 h before now). */
 const APPROVALS_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 import type { AuthUser } from "@/types/auth";
-import type { PerformanceData } from "@/types/performance";
 import type { NotificationFeed } from "@/types/notification";
 import type { CompletionBatchSummary } from "@/types/certificate";
-import type { ClassRecord, DashboardRepository, TestRecord } from "@/repositories/dashboard.repository.core";
+import { DashboardValidationError, type ClassRecord, type DashboardRepository, type TestRecord } from "@/repositories/dashboard.repository.core";
+
+export type { DashboardAnalyticsResult };
+
+/** Both halves, started together; each resolves independently and never rejects. */
+export interface DashboardLoad {
+  core: Promise<AdminDashboardData>;
+  analytics: Promise<DashboardAnalyticsResult>;
+}
 
 export class DashboardAuthorizationError extends Error {
   constructor(message = "Only Super Admins can view this dashboard.") {
@@ -67,10 +93,10 @@ export interface AdminDashboardServiceDeps {
     | "listClassesOn"
     | "listUpcomingClasses"
     | "listUpcomingTests"
+    | "getAnalytics"
   >;
   getCurrentUser: () => Promise<AuthUser | null>;
   getAccountTotals: () => Promise<AccountTotals>;
-  getPerformance: () => Promise<PerformanceData | null>;
   getNotifications: (limit: number) => Promise<NotificationFeed | null>;
   /** Batches with completion counts (the Certificates page's list). */
   getCompletionBatches: () => Promise<CompletionBatchSummary[] | null>;
@@ -102,23 +128,17 @@ function toTest(r: TestRecord, now: Date): DashboardTest {
   };
 }
 
-/** Only the summary figures the dashboard shows (no module or student detail). */
-function toPerformance(p: PerformanceData): DashboardPerformance {
-  return {
-    scopeLabel: p.scopeLabel,
-    testAverage: p.metrics.testAverage,
-    passRate: p.metrics.passRate,
-    releasedResults: p.metrics.releasedResults,
-    attendancePercent: p.metrics.attendancePercent,
-    attendanceMarked: p.metrics.attendanceMarked,
-    assignmentAverage: p.metrics.assignmentAverage,
-    assignmentsScored: p.metrics.assignmentsScored,
-    trend: p.trend.map((t, i) => ({ label: String(i + 1), title: t.title, value: t.averagePercent })),
-    topics: weakestTopics(p.modules ?? []),
-    topicsAssessed: (p.modules ?? []).length,
-    weakTopics: p.weakModules.length,
-  };
+/** The selected period and its comparison period (India dates), from the existing period utilities. */
+function dashboardPeriod(key: PeriodKey, today: string): DashboardPeriod {
+  const range = periodRange(key, today);
+  const prev = previousComparable(range);
+  return { key, label: PERIOD_LABEL[key], from: range.from, to: range.to, prevFrom: prev.from, prevTo: prev.to };
 }
+
+const CURRENT_STATE_HEALTH: Pick<HealthLine, "key" | "label" | "href" | "linkLabel">[] = [
+  { key: "trainer_coverage", label: "Trainer coverage", href: "/admin/batches", linkLabel: "Review batch trainers" },
+  { key: "batch_capacity", label: "Batch capacity", href: "/admin/batches", linkLabel: "Review upcoming batches" },
+];
 
 export function createAdminDashboardService(deps: AdminDashboardServiceDeps) {
   const now = deps.now ?? (() => new Date());
@@ -143,37 +163,74 @@ export function createAdminDashboardService(deps: AdminDashboardServiceDeps) {
     }
   }
 
-  return {
-    async getDashboard(): Promise<AdminDashboardData> {
-      const user = await deps.getCurrentUser();
-      if (!user || user.role !== "admin") throw new DashboardAuthorizationError();
+  /**
+   * One dashboard_analytics call for the period. Midnight edge: this server can reach the next India day
+   * a moment before the database does; if the database then rejects an end date of "today" (22023),
+   * retry ONCE with yesterday as the end. Any other error is not retried.
+   */
+  async function fetchAnalytics(period: DashboardPeriod, today: string): Promise<unknown> {
+    try {
+      return await deps.repository.getAnalytics(period.from, period.to, ANALYTICS_LIST_LIMIT);
+    } catch (err) {
+      if (!(err instanceof DashboardValidationError) || period.to !== today) throw err;
+      const to = addDays(today, -1);
+      return deps.repository.getAnalytics(period.from > to ? to : period.from, to, ANALYTICS_LIST_LIMIT);
+    }
+  }
 
-      const at = now();
-      const today = indiaDate(at);
-      const repo = deps.repository;
+  /** The period-based panels and the six-line health; never rejects. */
+  async function loadAnalytics(period: DashboardPeriod, today: string, currentBatchRows: Promise<CurrentBatchRecord[]>): Promise<DashboardAnalyticsResult> {
+    const raw = await section("analytics", async () => parseAnalytics(await fetchAnalytics(period, today)));
+    const panels: DashboardSection<AnalyticsPanels> =
+      raw.status === "ok" ? await section("analytics panels", async () => buildAnalyticsPanels(raw.data, period.key)) : { status: "error" };
 
-      // Shared reads (each runs once even when two sections use it).
-      const batchCounts = repo.countBatchesByStatus();
-      const classesToday = repo.countClassesOn(today);
-      const pendingCompletions = repo.countCompletionsAwaitingApproval();
-      const currentBatchRows = repo.listCurrentBatches();
-      const currentBatches = currentBatchRows.then(summarizeCurrentBatches);
-      // Unhandled-rejection safety: each shared promise is awaited by its sections below.
-      for (const p of [batchCounts, classesToday, pendingCompletions, currentBatchRows, currentBatches]) p.catch(() => undefined);
+    const rows = await section("health batches", () => currentBatchRows);
+    const currentLines: HealthLine[] =
+      rows.status === "ok"
+        ? [trainerCoverageHealth(rows.data), batchCapacityHealth(rows.data, today)]
+        : CURRENT_STATE_HEALTH.map((b) => ({ ...b, status: "unavailable" as const, reason: "Current batch data could not be loaded." }));
+    const analyticsLines = raw.status === "ok" ? analyticsHealth(raw.data.health) : unavailableAnalyticsHealth();
+    const health: DashboardSection<TrainingHealthView> =
+      rows.status === "error" && raw.status === "error" ? { status: "error" } : { status: "ok", data: trainingHealth([...currentLines, ...analyticsLines]) };
+    return { panels, health };
+  }
 
-      // D2a comparisons (real data only): classes on the same India weekday last week; recommendations
-      // pending exactly 7 × 24 h ago, rebuilt from the completion status events since then.
-      const lastWeekDay = addDays(today, -7);
-      const lookback = new Date(at.getTime() - APPROVALS_LOOKBACK_MS).toISOString();
-      const classesComparison = optional("classesToday comparison", async () =>
-        compare(await classesToday, await repo.countClassesOn(lastWeekDay), "vs same day last week")
-      );
-      const approvalsComparison = optional("approvals comparison", async () => {
-        const [now_, events] = await Promise.all([pendingCompletions, repo.listCompletionStatusEventsAfter(lookback)]);
-        return compare(now_, pendingApprovalsAt(now_, events), "vs 7 days ago");
-      });
+  /** Starts both halves for a `?period=` value (validated; default this_month). Super Admin only. */
+  async function load(periodParam?: unknown): Promise<DashboardLoad> {
+    const user = await deps.getCurrentUser();
+    if (!user || user.role !== "admin") throw new DashboardAuthorizationError();
 
-      const [metrics, attention, todayClasses, upcomingClasses, upcomingTests, overview, performance, activity, approvals, health] = await Promise.all([
+    const at = now();
+    const today = indiaDate(at);
+    const period = dashboardPeriod(resolvePeriodKey(periodParam), today);
+    const repo = deps.repository;
+
+    // Shared reads (each runs once even when two sections use it).
+    const batchCounts = repo.countBatchesByStatus();
+    const classesToday = repo.countClassesOn(today);
+    const pendingCompletions = repo.countCompletionsAwaitingApproval();
+    const currentBatchRows = repo.listCurrentBatches();
+    const currentBatches = currentBatchRows.then(summarizeCurrentBatches);
+    // Unhandled-rejection safety: each shared promise is awaited by its sections below.
+    for (const p of [batchCounts, classesToday, pendingCompletions, currentBatchRows, currentBatches]) p.catch(() => undefined);
+
+    // The period-based half starts now, in parallel with the current-state half.
+    const analytics = loadAnalytics(period, today, currentBatchRows);
+
+    // D2a comparisons (real data only): classes on the same India weekday last week; recommendations
+    // pending exactly 7 × 24 h ago, rebuilt from the completion status events since then.
+    const lastWeekDay = addDays(today, -7);
+    const lookback = new Date(at.getTime() - APPROVALS_LOOKBACK_MS).toISOString();
+    const classesComparison = optional("classesToday comparison", async () =>
+      compare(await classesToday, await repo.countClassesOn(lastWeekDay), "vs same day last week")
+    );
+    const approvalsComparison = optional("approvals comparison", async () => {
+      const [now_, events] = await Promise.all([pendingCompletions, repo.listCompletionStatusEventsAfter(lookback)]);
+      return compare(now_, pendingApprovalsAt(now_, events), "vs 7 days ago");
+    });
+
+    const core = (async (): Promise<AdminDashboardData> => {
+      const [metrics, attention, todayClasses, upcomingClasses, upcomingTests, overview, activity, approvals] = await Promise.all([
         section("metrics", async () => {
           const [activeStudents, activeTrainers, batches, today_, pending, classesCmp, approvalsCmp] = await Promise.all([
             repo.countActiveAccounts("student"),
@@ -215,11 +272,6 @@ export function createAdminDashboardService(deps: AdminDashboardServiceDeps) {
           const [batches, facts] = await Promise.all([batchCounts, currentBatches]);
           return { batches, courses: facts.courses, coursesWithCurrentBatches: facts.coursesWithCurrentBatches };
         }),
-        section("performance", async () => {
-          const p = await deps.getPerformance();
-          if (!p) throw new Error("performance unavailable");
-          return toPerformance(p);
-        }),
         section("activity", async () => {
           const feed = await deps.getNotifications(ACTIVITY_LIMIT);
           if (!feed) throw new Error("notifications unavailable");
@@ -240,13 +292,18 @@ export function createAdminDashboardService(deps: AdminDashboardServiceDeps) {
           if (!rows) throw new Error("completion batches unavailable");
           return { total, ...pendingApprovalBatches(rows) };
         }),
-        section("health", async () => {
-          const rows = await currentBatchRows;
-          return [trainerCoverageHealth(rows), batchCapacityHealth(rows, today)];
-        }),
       ]);
+      return { today, generatedAt: at.toISOString(), period, metrics, attention, todayClasses, upcomingClasses, upcomingTests, overview, activity, approvals };
+    })();
 
-      return { today, generatedAt: at.toISOString(), metrics, attention, todayClasses, upcomingClasses, upcomingTests, overview, performance, activity, approvals, health };
+    return { core, analytics };
+  }
+
+  return {
+    load,
+    /** The current-state half only (convenience for callers that don't render analytics). */
+    async getDashboard(periodParam?: unknown): Promise<AdminDashboardData> {
+      return (await load(periodParam)).core;
     },
   };
 }

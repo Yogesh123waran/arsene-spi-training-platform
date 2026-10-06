@@ -11,8 +11,9 @@ import { randomUUID } from "node:crypto";
 import { db, ids } from "./harness.mjs";
 
 const build = process.env.QI_BUILD;
-const { createDashboardRepository } = await import(`${build}/repositories/dashboard.repository.core.mjs`);
+const { createDashboardRepository, DashboardPermissionError, DashboardValidationError } = await import(`${build}/repositories/dashboard.repository.core.mjs`);
 const lib = await import(`${build}/lib/dashboard/admin-dashboard.mjs`);
+const analytics = await import(`${build}/lib/dashboard/analytics.mjs`);
 const periods = await import(`${build}/lib/dashboard/periods.mjs`);
 
 let U = {};
@@ -162,4 +163,30 @@ test("D2a RLS: the same reads under a student's or an unrelated trainer's sessio
   }
   // The batch's own trainer sees them (RLS decides, not the dashboard; the dashboard service itself is Super Admin only).
   assert.ok((await repoAs(U.ad_TR).listCompletionStatusEventsAfter(T)).some((e) => e.completionId === U.ad_R1));
+});
+
+// ---------------------------------------------------------------- D2b-2A: the real dashboard_analytics response through the repository
+
+test("D2b-2A: getAnalytics returns the real 0024 response through the Super Admin's session, and it passes the app's validator", async () => {
+  const today = await db.admin("select to_char((now() at time zone 'Asia/Kolkata')::date, 'YYYY-MM-DD')");
+  for (const key of periods.PERIOD_KEYS) {
+    const range = periods.periodRange(key, today);
+    const json = await repoAs(ids.A).getAnalytics(range.from, range.to, analytics.ANALYTICS_LIST_LIMIT);
+    const raw = analytics.parseAnalytics(json);
+    assert.deepEqual([raw.period.from, raw.period.to], [range.from, range.to], key);
+    const prev = periods.previousComparable(range);
+    assert.deepEqual([raw.period.prev_from, raw.period.prev_to], [prev.from, prev.to], `${key}: the database derives the same comparison period as the app`);
+    const panels = analytics.buildAnalyticsPanels(raw, key);
+    assert.equal(panels.performance.length, 4);
+    assert.ok(panels.trend.length >= 1);
+    assert.equal(analytics.analyticsHealth(raw.health).length, 4);
+  }
+});
+
+test("D2b-2A: the database's refusals map to the repository's typed errors — trainer → permission, future end date → validation", async () => {
+  const today = await db.admin("select to_char((now() at time zone 'Asia/Kolkata')::date, 'YYYY-MM-DD')");
+  await quiet(async () => {
+    await assert.rejects(repoAs(U.ad_TR).getAnalytics(periods.monthStart(today), today, 10), DashboardPermissionError);
+    await assert.rejects(repoAs(ids.A).getAnalytics(today, periods.addDays(today, 1), 10), DashboardValidationError, "the midnight-edge error the service retries");
+  });
 });

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, Award, CalendarDays, CalendarPlus, FileQuestion, Layers, Minus, ShieldCheck, UserPlus } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent } from "@/components/ui/Card";
@@ -9,7 +9,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/Table";
-import { LineChart } from "@/components/ui/charts";
+import { TrendChart } from "@/components/dashboard/TrendChart";
 import { formatDateTime } from "@/utils/format";
 import {
   BATCH_STATUS_LABEL,
@@ -20,14 +20,22 @@ import {
   type AttentionItem,
   type DashboardClass,
   type DashboardMetrics,
-  type DashboardPerformance,
+  type DashboardPeriod,
   type DashboardSection,
   type DashboardTest,
-  type HealthLine,
   type TrainingOverview,
   HEALTH_LABEL,
 } from "@/lib/dashboard/admin-dashboard";
-import type { Comparison } from "@/lib/dashboard/periods";
+import { PERIOD_KEYS, PERIOD_LABEL, type Comparison } from "@/lib/dashboard/periods";
+import {
+  TOPIC_BAND_LABEL,
+  formatDateRange,
+  formatPercent,
+  formatPoints,
+  type AnalyticsPeriod,
+  type DashboardAnalyticsResult,
+  type RateComparison,
+} from "@/lib/dashboard/analytics";
 
 /**
  * Super Admin dashboard (D1). A server component that only renders the
@@ -43,7 +51,6 @@ function calendarDate(isoDate: string, options: Intl.DateTimeFormatOptions = { w
   return Number.isNaN(d.getTime()) ? isoDate : new Intl.DateTimeFormat("en-IN", { ...options, timeZone: "UTC" }).format(d);
 }
 
-const percent = (v: number | null) => (v === null ? "—" : `${Math.round(v * 10) / 10}%`);
 
 function Panel({ id, title, description, action, children, className }: { id: string; title: string; description?: string; action?: { href: string; label: string }; children: ReactNode; className?: string }) {
   return (
@@ -334,80 +341,116 @@ function Overview({ section }: { section: DashboardSection<TrainingOverview> }) 
   );
 }
 
-// ---------------------------------------------------------------- performance
+// ---------------------------------------------------------------- analytics panels (D2b-2A: period-based, streamed)
 
-function Performance({ section, className }: { section: DashboardSection<DashboardPerformance>; className?: string }) {
+/** A placeholder with the panel's heading while the analytics load (this panel only). */
+function PanelLoading({ id, title, className }: { id: string; title: string; className?: string }) {
+  return (
+    <Panel id={id} title={title} className={className}>
+      <div aria-busy="true" aria-live="polite">
+        <span className="sr-only">Loading {title.toLowerCase()}…</span>
+        <Skeleton className="h-4 w-2/3" />
+        <Skeleton className="mt-3 h-24 w-full" />
+        <Skeleton className="mt-3 h-4 w-1/2" />
+      </div>
+    </Panel>
+  );
+}
+
+function AnalyticsUnavailable() {
+  return <ErrorState title="Advanced analytics are temporarily unavailable." description="Please refresh the page. Other sections are unaffected." className="py-8" />;
+}
+
+const periodText = (p: AnalyticsPeriod) => `${p.label} · ${p.rangeText} vs ${p.prevRangeText}`;
+
+function ComparisonText({ c }: { c: RateComparison }) {
+  if (c.state === "no_data") return <span className="text-ink-faint">No data in this period</span>;
+  if (c.state === "no_comparison") return <span className="text-ink-faint">No comparison data</span>;
+  const Icon = c.points === null || c.points === 0 ? Minus : c.points > 0 ? ArrowUp : ArrowDown;
+  return (
+    <span className="inline-flex items-center gap-1 text-ink-muted">
+      <Icon className="h-3 w-3" aria-hidden />
+      <span className="font-mono">{formatPoints(c)}</span>
+      <span className="text-ink-faint">vs {formatPercent(c.previous)} before</span>
+    </span>
+  );
+}
+
+async function PerformancePanel({ analytics, className }: { analytics: Promise<DashboardAnalyticsResult>; className?: string }) {
+  const { panels } = await analytics;
   return (
     <Panel
       id="dash-performance"
       title="Training performance"
-      description={section.status === "ok" ? `${section.data.scopeLabel} · all released results to date` : undefined}
-      action={{ href: "/admin/performance", label: "View performance" }}
+      description={panels.status === "ok" ? periodText(panels.data.period) : undefined}
+      action={{ href: "/admin/performance", label: "View detailed performance" }}
       className={className}
     >
-      {section.status === "error" ? (
-        <SectionError />
+      {panels.status === "error" ? (
+        <AnalyticsUnavailable />
+      ) : !panels.data.hasActivity ? (
+        <Compact
+          title="No activity in this period"
+          description={`No released test results, attendance records or scored assignments between ${panels.data.period.rangeText}.${panels.data.hasComparison ? "" : " The comparison period has none either."}`}
+        />
       ) : (
         <div className="flex flex-col gap-5">
           <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            {[
-              { label: "Test average", value: percent(section.data.testAverage), note: `${section.data.releasedResults} released results` },
-              { label: "Pass rate", value: percent(section.data.passRate), note: "Of released results" },
-              { label: "Attendance", value: percent(section.data.attendancePercent), note: `${section.data.attendanceMarked} marked` },
-              { label: "Assignment average", value: percent(section.data.assignmentAverage), note: `${section.data.assignmentsScored} scored` },
-            ].map((m) => (
-              <div key={m.label} className="rounded-md border border-surface-border px-3 py-2">
+            {panels.data.performance.map((m) => (
+              <div key={m.key} className="rounded-md border border-surface-border px-3 py-2">
                 <dt className="text-xs text-ink-muted">{m.label}</dt>
-                <dd className="font-mono text-xl font-semibold text-ink">{m.value}</dd>
-                <dd className="text-2xs text-ink-faint">{m.note}</dd>
+                <dd className="font-mono text-xl font-semibold text-ink">{formatPercent(m.comparison.current)}</dd>
+                <dd className="text-2xs">
+                  <ComparisonText c={m.comparison} />
+                </dd>
+                <dd className="text-2xs text-ink-faint">
+                  {m.evidence.current} {m.evidenceNoun} · {m.evidence.display === "—" ? "none before" : `${m.evidence.display} vs before`}
+                </dd>
               </div>
             ))}
           </dl>
-          {section.data.trend.length < 2 ? (
-            <p className="text-sm text-ink-muted">A trend appears once at least two tests have released results.</p>
-          ) : (
-            <figure aria-labelledby="dash-trend-caption">
-              <figcaption id="dash-trend-caption" className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
-                Average score per released test (oldest to newest)
-              </figcaption>
-              <div aria-hidden="true" className="mt-2">
-                <LineChart data={section.data.trend} max={100} />
-              </div>
-              <ol className="sr-only">
-                {section.data.trend.map((p) => (
-                  <li key={p.label}>
-                    {p.title}: {percent(p.value)}
-                  </li>
-                ))}
-              </ol>
-            </figure>
-          )}
+          <figure aria-labelledby="dash-trend-caption">
+            <figcaption id="dash-trend-caption" className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
+              {panels.data.period.bucket === "week" ? "Weekly" : "Monthly"} trend (India time) — gaps mean no data in that {panels.data.period.bucket}
+            </figcaption>
+            <div className="mt-2">
+              <TrendChart points={panels.data.trend} captionId="dash-trend-caption" />
+            </div>
+          </figure>
         </div>
       )}
     </Panel>
   );
 }
 
-// ---------------------------------------------------------------- training health (D2a: checks backed by current data)
+const HEALTH_TONE = { healthy: "green", watch: "amber", attention: "red", no_data: "neutral", unavailable: "neutral" } as const;
 
-const HEALTH_TONE = { healthy: "green", watch: "amber", attention: "red" } as const;
-
-function TrainingHealth({ section }: { section: DashboardSection<HealthLine[]> }) {
+async function TrainingHealthPanel({ analytics, className }: { analytics: Promise<DashboardAnalyticsResult>; className?: string }) {
+  const { health } = await analytics;
   return (
-    <Panel id="dash-health" title="Training health" description="Each status shows the database fact behind it">
-      {section.status === "error" ? (
+    <Panel id="dash-health" title="Training health" description="Worst line wins · each status shows the database fact behind it" className={className}>
+      {health.status === "error" ? (
         <SectionError />
       ) : (
         <>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-surface-border bg-surface-sunken px-3 py-2">
+            <span className="text-sm font-medium text-ink">
+              Overall: {health.data.overall.status === "no_data" ? "No data" : HEALTH_LABEL[health.data.overall.status]}
+              {health.data.overall.drivers.length > 0 && <span className="font-normal text-ink-muted"> — {health.data.overall.drivers.join(", ")}</span>}
+            </span>
+            <span className="text-2xs text-ink-faint">
+              Based on {health.data.overall.basedOn} of {health.data.overall.total} indicators
+            </span>
+          </div>
           <ul className="divide-y divide-surface-border">
-            {section.data.map((h) => (
+            {health.data.lines.map((h) => (
               <li key={h.key} className="py-3 first:pt-0 last:pb-0">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm font-medium text-ink">{h.label}</span>
                   <Badge tone={HEALTH_TONE[h.status]}>{HEALTH_LABEL[h.status]}</Badge>
                 </div>
                 <p className="mt-1 text-xs text-ink-muted">{h.reason}</p>
-                {h.status !== "healthy" && (
+                {(h.status === "watch" || h.status === "attention") && (
                   <Link href={h.href} className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-signal-blue hover:underline">
                     {h.linkLabel} <ArrowRight className="h-3 w-3" aria-hidden />
                   </Link>
@@ -415,49 +458,49 @@ function TrainingHealth({ section }: { section: DashboardSection<HealthLine[]> }
               </li>
             ))}
           </ul>
-          <p className="mt-4 text-2xs text-ink-faint">Attendance, assessment, assignment and student checks will be added with the period analytics.</p>
         </>
       )}
     </Panel>
   );
 }
 
-// ---------------------------------------------------------------- weak topics (module performance from released results)
+const BAND_TONE = { healthy: "green", watch: "amber", attention: "red" } as const;
+const BAND_BAR = { healthy: "bg-signal-green", watch: "bg-signal-amber", attention: "bg-signal-red" } as const;
 
-const BAND_LABEL = { weak: "Weak", developing: "Developing", strong: "Strong" } as const;
-const BAND_TONE = { weak: "red", developing: "amber", strong: "green" } as const;
-const BAND_BAR = { weak: "bg-signal-red", developing: "bg-signal-amber", strong: "bg-signal-green" } as const;
-
-function WeakTopics({ section }: { section: DashboardSection<DashboardPerformance> }) {
+async function WeakTopicsPanel({ analytics }: { analytics: Promise<DashboardAnalyticsResult> }) {
+  const { panels } = await analytics;
   return (
-    <Panel id="dash-topics" title="Weak topics" description="Modules by average score in released tests (weak below 65%, strong from 80%)" action={{ href: "/admin/performance", label: "View module performance" }}>
-      {section.status === "error" ? (
-        <SectionError />
-      ) : section.data.topics.length === 0 ? (
-        <Compact title="No module results yet" description="Module scores appear once tests with module-tagged questions release their results." />
+    <Panel
+      id="dash-topics"
+      title="Weak Topics"
+      description={panels.status === "ok" ? `${panels.data.period.label} · ${panels.data.period.rangeText} · Healthy ≥ 80%, Watch ≥ 65%, Attention < 65%` : undefined}
+      action={{ href: "/admin/performance", label: "View module performance" }}
+    >
+      {panels.status === "error" ? (
+        <AnalyticsUnavailable />
+      ) : panels.data.topics.length === 0 ? (
+        <Compact
+          title="Insufficient data"
+          description={`No module has 5 or more graded answers in this period (released results: n = ${panels.data.resultsInPeriod}).`}
+        />
       ) : (
-        <>
-          <p className="mb-3 text-xs text-ink-muted">
-            {section.data.weakTopics} of {section.data.topicsAssessed} assessed {section.data.topicsAssessed === 1 ? "module is" : "modules are"} below 65%.
-          </p>
-          <ul className="flex flex-col gap-3">
-            {section.data.topics.map((t) => (
-              <li key={t.moduleId}>
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="min-w-0 truncate text-ink">{t.title}</span>
-                  <span className="flex shrink-0 items-center gap-2">
-                    <span className="font-mono text-xs text-ink">{percent(t.percent)}</span>
-                    <Badge tone={BAND_TONE[t.band]}>{BAND_LABEL[t.band]}</Badge>
-                  </span>
-                </div>
-                <div className="mt-1 h-1.5 w-full overflow-hidden rounded-sm bg-surface-sunken" aria-hidden="true">
-                  <div className={`h-full ${BAND_BAR[t.band]}`} style={{ width: `${Math.max(0, Math.min(100, t.percent))}%` }} />
-                </div>
-                <p className="mt-0.5 text-2xs text-ink-faint">{t.answers} graded answers</p>
-              </li>
-            ))}
-          </ul>
-        </>
+        <ul className="flex flex-col gap-3">
+          {panels.data.topics.map((t) => (
+            <li key={t.moduleId}>
+              <div className="flex items-center justify-between gap-3 text-sm">
+                <span className="min-w-0 truncate text-ink">{t.title}</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="font-mono text-xs text-ink">{formatPercent(t.percent)}</span>
+                  <Badge tone={BAND_TONE[t.band]}>{TOPIC_BAND_LABEL[t.band]}</Badge>
+                </span>
+              </div>
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-sm bg-surface-sunken" aria-hidden="true">
+                <div className={`h-full ${BAND_BAR[t.band]}`} style={{ width: `${Math.max(0, Math.min(100, t.percent))}%` }} />
+              </div>
+              <p className="mt-0.5 text-2xs text-ink-faint">{t.answers} graded answers</p>
+            </li>
+          ))}
+        </ul>
       )}
     </Panel>
   );
@@ -601,31 +644,61 @@ function QuickActions({ className }: { className?: string }) {
 export const DASHBOARD_TITLE = "Training Intelligence & Operations";
 export const DASHBOARD_SUBTITLE = "Track performance, manage operations, and ensure successful training outcomes.";
 
-export function AdminDashboard({ data }: { data: AdminDashboardData }) {
+/** Reporting-period selector: plain server links (`?period=`), no client state. */
+function PeriodSelector({ period, today }: { period: DashboardPeriod; today: string }) {
+  return (
+    <div className="flex flex-col items-start gap-1.5 sm:items-end">
+      <nav aria-label="Reporting period">
+        <ul className="flex flex-wrap gap-1 rounded-md border border-surface-border bg-surface-raised p-1">
+          {PERIOD_KEYS.map((key) => {
+            const selected = key === period.key;
+            return (
+              <li key={key}>
+                <Link
+                  href={`/admin?period=${key}`}
+                  aria-current={selected ? "page" : undefined}
+                  className={
+                    "block rounded px-2.5 py-1 text-xs font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500 " +
+                    (selected ? "bg-primary-500 text-white" : "text-ink-muted hover:bg-surface-sunken hover:text-ink")
+                  }
+                >
+                  {PERIOD_LABEL[key]}
+                </Link>
+              </li>
+            );
+          })}
+        </ul>
+      </nav>
+      <p className="text-2xs text-ink-muted">
+        <span className="font-medium text-ink">
+          {period.label} · {formatDateRange(period.from, period.to)}
+        </span>{" "}
+        vs {formatDateRange(period.prevFrom, period.prevTo)} · As of{" "}
+        <time dateTime={today}>{calendarDate(today, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</time> · India time
+      </p>
+    </div>
+  );
+}
+
+export function AdminDashboard({ data, analytics }: { data: AdminDashboardData; analytics: Promise<DashboardAnalyticsResult> }) {
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title={DASHBOARD_TITLE}
-        description={DASHBOARD_SUBTITLE}
-        actions={
-          <p className="rounded-md border border-surface-border bg-surface-raised px-3 py-1.5 text-xs text-ink-muted">
-            As of{" "}
-            <time dateTime={data.today} className="font-medium text-ink">
-              {calendarDate(data.today, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
-            </time>{" "}
-            · India time
-          </p>
-        }
-      />
+      <PageHeader title={DASHBOARD_TITLE} description={DASHBOARD_SUBTITLE} actions={<PeriodSelector period={data.period} today={data.today} />} />
       <Metrics section={data.metrics} />
       <Attention section={data.attention} />
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        <Performance section={data.performance} className="lg:col-span-2" />
-        <TrainingHealth section={data.health} />
+        <Suspense key={`performance-${data.period.key}`} fallback={<PanelLoading id="dash-performance" title="Training performance" className="lg:col-span-2" />}>
+          <PerformancePanel analytics={analytics} className="lg:col-span-2" />
+        </Suspense>
+        <Suspense key={`health-${data.period.key}`} fallback={<PanelLoading id="dash-health" title="Training health" />}>
+          <TrainingHealthPanel analytics={analytics} />
+        </Suspense>
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <Overview section={data.overview} />
-        <WeakTopics section={data.performance} />
+        <Suspense key={`topics-${data.period.key}`} fallback={<PanelLoading id="dash-topics" title="Weak Topics" />}>
+          <WeakTopicsPanel analytics={analytics} />
+        </Suspense>
         <TodayClasses section={data.todayClasses} today={data.today} />
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">

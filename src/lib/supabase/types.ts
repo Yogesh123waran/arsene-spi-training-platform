@@ -1734,6 +1734,15 @@ export type Database = {
         Args: { p_batch_id: string; p_student_id: string };
         Returns: Json;
       };
+      /**
+       * 0024, Super Admin (SECURITY INVOKER, the caller's RLS): grouped dashboard analytics for India dates
+       * [p_from, p_to] and the same number of days before. Returns one JSON object (validated by
+       * src/lib/dashboard/analytics.ts before use).
+       */
+      dashboard_analytics: {
+        Args: { p_from: string; p_to: string; p_limit?: number };
+        Returns: Json;
+      };
       /** 0017 (address rule widened by 0019 D1). Returns { ok, invitation_id? , reason? }. */
       create_user_invitation: {
         Args: { p: Json };

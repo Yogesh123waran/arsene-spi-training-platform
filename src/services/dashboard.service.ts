@@ -1,7 +1,6 @@
 import "server-only";
 import { authService } from "./auth.service";
 import { usersService } from "./users.service";
-import { performanceService } from "./performance.service";
 import { notificationsService } from "./notifications.service";
 import { certificatesService } from "./certificates.service";
 import { dashboardRepository } from "@/repositories/dashboard.repository";
@@ -20,9 +19,9 @@ export const adminDashboardService = createAdminDashboardService({
     const { totals } = await usersService.listUsers(null);
     return { invited: totals.byStatus.invited, suspended: totals.byStatus.suspended, missingRecord: totals.missingRecord };
   },
-  getPerformance: () => performanceService.getPerformance(),
   getNotifications: (limit) => notificationsService.listNotifications(limit),
   getCompletionBatches: () => certificatesService.listCompletionBatches(),
 });
 
 export { DashboardAuthorizationError } from "./dashboard.service.core";
+export type { DashboardAnalyticsResult, DashboardLoad } from "./dashboard.service.core";

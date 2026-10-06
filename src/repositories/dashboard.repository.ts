@@ -12,5 +12,5 @@ export const dashboardRepository = createDashboardRepository(async () =>
   authConfig.mode === "supabase" ? createSupabaseServerClient() : null
 );
 
-export { DashboardRepositoryError } from "./dashboard.repository.core";
+export { DashboardRepositoryError, DashboardPermissionError, DashboardValidationError } from "./dashboard.repository.core";
 export type { DashboardRepository } from "./dashboard.repository.core";

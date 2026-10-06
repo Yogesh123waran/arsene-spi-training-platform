@@ -20,6 +20,7 @@ for (const rel of [
   "src/lib/supabase/paging.ts",
   "src/lib/dashboard/periods.ts",
   "src/lib/dashboard/admin-dashboard.ts",
+  "src/lib/dashboard/analytics.ts",
   "src/repositories/dashboard.repository.core.ts",
   "src/services/dashboard.service.core.ts",
 ]) {

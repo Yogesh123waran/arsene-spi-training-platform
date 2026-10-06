@@ -103,6 +103,7 @@ try {
     "src/types/performance.ts",
     "src/lib/dashboard/periods.ts",
     "src/lib/dashboard/admin-dashboard.ts",
+    "src/lib/dashboard/analytics.ts",
     "src/repositories/dashboard.repository.core.ts",
   ];
   for (const rel of sources) {

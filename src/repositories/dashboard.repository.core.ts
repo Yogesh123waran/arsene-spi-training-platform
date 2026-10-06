@@ -24,6 +24,22 @@ export class DashboardRepositoryError extends Error {
   }
 }
 
+/** dashboard_analytics refused the caller (42501). */
+export class DashboardPermissionError extends Error {
+  constructor(message = "Only Super Admins can view dashboard analytics.") {
+    super(message);
+    this.name = "DashboardPermissionError";
+  }
+}
+
+/** dashboard_analytics rejected the period (22023), e.g. an end date after the database's India today. */
+export class DashboardValidationError extends Error {
+  constructor(message = "The dashboard period was not accepted.") {
+    super(message);
+    this.name = "DashboardValidationError";
+  }
+}
+
 export interface ClassRecord {
   id: string;
   title: string;
@@ -140,6 +156,29 @@ export function createDashboardRepository(getClient: () => Promise<Client | null
   }
 
   return {
+    /**
+     * public.dashboard_analytics (0024) for India dates [from, to] — ONE call, through the caller's session
+     * (SECURITY INVOKER: their RLS applies). Returns the raw JSON; the service validates it.
+     */
+    async getAnalytics(from: string, to: string, limit: number): Promise<unknown> {
+      const supabase = await client("getAnalytics");
+      let result: { data: unknown; error: unknown };
+      try {
+        result = await supabase.rpc("dashboard_analytics", { p_from: from, p_to: to, p_limit: limit });
+      } catch (err) {
+        logDbError("getAnalytics", err);
+        throw new DashboardRepositoryError();
+      }
+      if (result.error) {
+        logDbError("getAnalytics", result.error);
+        const code = (result.error as { code?: unknown }).code;
+        if (code === "42501") throw new DashboardPermissionError();
+        if (code === "22023") throw new DashboardValidationError();
+        throw new DashboardRepositoryError();
+      }
+      return result.data;
+    },
+
     /** Accounts with this role whose account is active (the Users page's role + status filter). */
     countActiveAccounts(role: "student" | "trainer"): Promise<number> {
       return count(`countActiveAccounts(${role})`, (s) =>
