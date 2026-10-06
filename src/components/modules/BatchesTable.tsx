@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Search, MoreHorizontal, Eye, Pencil, Users, UserCog } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -33,6 +34,10 @@ const PAGE_SIZE = 5;
  * assignment regardless of what the browser shows.
  */
 export function BatchesTable({ rows, assignment }: { rows: BatchSummary[]; assignment?: { trainers: AvailableTrainerOption[] } }) {
+  const router = useRouter();
+  // P3.8: the Super Admin view (the only one passed `assignment`) opens the read-only batch detail;
+  // the trainer view keeps the placeholder until the trainer detail exists.
+  const detailBasePath = assignment ? "/admin/batches" : null;
   const [assignTarget, setAssignTarget] = useState<AssignTrainerTarget | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -140,7 +145,7 @@ export function BatchesTable({ rows, assignment }: { rows: BatchSummary[]; assig
                       </button>
                     }
                   >
-                    <DropdownItem onClick={() => notImplemented("View batch")}>
+                    <DropdownItem onClick={() => (detailBasePath ? router.push(`${detailBasePath}/${encodeURIComponent(b.id)}`) : notImplemented("View batch"))}>
                       <Eye className="h-3.5 w-3.5" /> View
                     </DropdownItem>
                     <DropdownItem onClick={() => notImplemented("Edit batch")}>

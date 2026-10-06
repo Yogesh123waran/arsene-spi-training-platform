@@ -940,6 +940,24 @@ export type UserAdminEventsRow = {
   detail: Json;
 };
 
+/**
+ * public.enrollment_events — append-only enrolment history (0017). Written
+ * only by the batch_students trigger (source admin / trainer / invitation /
+ * direct / baseline); clients may only SELECT (Super Admin: all rows;
+ * trainer: batches they currently teach).
+ */
+export type EnrollmentEventsRow = {
+  id: number;
+  occurred_at: string;
+  batch_id: string;
+  student_id: string;
+  previous_status: EnrollmentStatusColumn | null;
+  new_status: EnrollmentStatusColumn;
+  actor_id: string | null;
+  source: "admin" | "trainer" | "invitation" | "direct" | "baseline";
+  reason: string | null;
+};
+
 /** One row returned by public.my_notifications(p_limit). */
 export type MyNotificationsRow = {
   id: string;
@@ -1441,6 +1459,12 @@ export type Database = {
         Update: NoClientWrites;
         Relationships: [];
       };
+      enrollment_events: {
+        Row: EnrollmentEventsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
     };
     Views: {
       test_best_results: {
@@ -1698,6 +1722,16 @@ export type Database = {
       /** Assign/change a current batch's trainer (row lock, audited; 0021 refuses direct writes). Returns { ok, reason?, previous?, trainer_id? }. */
       admin_assign_batch_trainer: {
         Args: { p_batch_id: string; p_trainer_id: string };
+        Returns: Json;
+      };
+      /** 0017/0023, Super Admin: enrol / withdraw / re-enrol / complete. Returns { ok, reason?, previous?, status? }. */
+      admin_set_enrollment: {
+        Args: { p_batch_id: string; p_student_id: string; p_status: EnrollmentStatusColumn; p_reason?: string | null };
+        Returns: Json;
+      };
+      /** 0017/0023, trainer: enrol an in-scope student into a batch they currently teach. Returns { ok, reason?, status? }. */
+      trainer_enroll_student: {
+        Args: { p_batch_id: string; p_student_id: string };
         Returns: Json;
       };
       /** 0017 (address rule widened by 0019 D1). Returns { ok, invitation_id? , reason? }. */

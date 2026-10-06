@@ -95,6 +95,10 @@ try {
     "src/lib/batches/assign-trainer.ts",
     "src/repositories/batch-trainer.repository.core.ts",
     "src/services/batch-trainer.service.core.ts",
+    // Enrolment application layer (Phase 7 P3.8)
+    "src/lib/enrollments/enrollment.ts",
+    "src/repositories/enrollment.repository.core.ts",
+    "src/services/enrollment.service.core.ts",
   ];
   for (const rel of sources) {
     const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {
