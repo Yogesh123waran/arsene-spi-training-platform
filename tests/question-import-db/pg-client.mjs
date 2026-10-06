@@ -169,7 +169,13 @@ export class PgClient {
     return new Builder(this, { kind: "rpc", fn: ident(fn), args });
   }
   from(table) {
-    return { select: (cols) => new Builder(this, { kind: "select", table: ident(table), cols }) };
+    return {
+      select: (cols, opts) => {
+        // Exact HEAD counts (select("id", { count: "exact", head: true })), as the dashboard repository uses: no rows, only `count`.
+        if (opts !== undefined && !(opts && opts.count === "exact" && opts.head === true)) throw new Error("only { count: 'exact', head: true } is supported");
+        return new Builder(this, { kind: "select", table: ident(table), cols, count: opts !== undefined });
+      },
+    };
   }
   /** Raw SQL (JSON-returning) under this identity. */
   async sql(query) {
@@ -228,6 +234,12 @@ class Builder {
     return `select coalesce(jsonb_agg(t), '[]'::jsonb)::text from (select ${cols} from public.${spec.table}${where}${order}${limit}) t`;
   }
   async execute() {
+    if (this.spec.count) {
+      const where = this.filters.length ? ` where ${this.filters.join(" and ")}` : "";
+      const result = await this.client.execute(`select count(*)::text from public.${this.spec.table}${where}`);
+      if (result.error) return { data: null, count: null, error: result.error };
+      return { data: null, count: Number(result.data), error: null };
+    }
     const embeds = this.spec.kind === "select" && this.spec.cols.includes("(");
     const result = await this.client.execute(this.toSql(embeds ? await this.client.db.foreignKeys() : null));
     if (result.error || !this.single) return result;

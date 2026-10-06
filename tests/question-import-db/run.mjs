@@ -99,6 +99,11 @@ try {
     "src/lib/enrollments/enrollment.ts",
     "src/repositories/enrollment.repository.core.ts",
     "src/services/enrollment.service.core.ts",
+    // Super Admin dashboard reads (D1)
+    "src/types/performance.ts",
+    "src/lib/dashboard/periods.ts",
+    "src/lib/dashboard/admin-dashboard.ts",
+    "src/repositories/dashboard.repository.core.ts",
   ];
   for (const rel of sources) {
     const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {
