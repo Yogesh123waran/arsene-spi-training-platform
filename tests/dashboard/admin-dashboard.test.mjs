@@ -515,4 +515,9 @@ test("analytics read model through the service: totals, trend, topics and health
   ]);
   assert.deepEqual(a.health.data.overall, { status: "attention", basedOn: 6, total: 6, drivers: ["Trainer coverage", "Batch capacity", "Students"] });
   assert.ok(p.datasets.batches.length === 1 && p.datasets.students.top.length === 1, "batch / course / student / progress data kept for D2b-2B–D");
+  // D2b-2B: batch / course comparison from the same single response (no further calls)
+  assert.deepEqual(p.batches.rows.map((b) => [b.name, b.href, b.performanceHref, b.testAvgChange.display, b.attendanceChange.display]), [
+    ["Batch One", "/admin/batches/b1", "/admin/performance?batch=b1", "+13.8 pp", "No comparison data"],
+  ]);
+  assert.deepEqual(p.courses.rows.map((c) => [c.title, c.href, c.testAvgChange.display]), [["Valves", "/admin/courses/c1", "+14.6 pp"]]);
 });

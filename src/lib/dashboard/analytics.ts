@@ -1,9 +1,10 @@
 /**
- * Dashboard analytics (D2b-2A) — the read side of public.dashboard_analytics
+ * Dashboard analytics (D2b-2A / 2B) — the read side of public.dashboard_analytics
  * (migration 0024). Pure: no I/O, no server imports.
  *
  *   parseAnalytics()      runtime validation of the RPC's JSON (no blind casts)
  *   buildAnalyticsPanels() the period-based read models the page renders
+ *   batch / course comparison (D2b-2B): name order as returned, evidence, pp change
  *   comparison helpers    rates in percentage points; counts as % change
  *   health indicators     attendance / assessment / assignments / students
  *                         (Q2 thresholds) and the overall worst-line-wins
@@ -592,8 +593,133 @@ export interface AnalyticsPanels {
   topics: AnalyticsTopic[];
   /** Released results in the period (context for the weak-topic evidence). */
   resultsInPeriod: number;
-  /** Kept for D2b-2B / 2C / 2D (batch, course, student and progress panels); not rendered in D2b-2A. */
+  /** D2b-2B: batch comparison (name order, as returned — never re-ranked). */
+  batches: ComparisonList<BatchComparisonRow>;
+  /** D2b-2B: course comparison (title order, as returned — never re-ranked). */
+  courses: ComparisonList<CourseComparisonRow>;
+  /** Kept for D2b-2C / 2D (student and progress panels); batch / course rows are rendered from `batches` / `courses`. */
   datasets: Pick<DashboardAnalyticsRaw, "batches" | "batches_total" | "courses" | "courses_total" | "students" | "delivery" | "delivery_total" | "enrolment" | "enrolment_total">;
+}
+
+// -------------------------------------------------------------------
+// Batch / course comparison (D2b-2B) — the batches[] / courses[] rows of 0024
+// -------------------------------------------------------------------
+
+/**
+ * One period figure with the records behind it. 0024 returns null below its
+ * evidence minimum (5 records), so null is "Insufficient data (n)" — never 0 %.
+ */
+export interface EvidenceFigure {
+  value: number | null;
+  /** Records behind the figure in the period. */
+  evidence: number;
+  /** "81.3%" or "Insufficient data (3)". */
+  display: string;
+}
+
+export function evidenceFigure(value: number | null, evidence: number): EvidenceFigure {
+  return { value, evidence, display: value === null ? `Insufficient data (${evidence})` : formatPercent(value) };
+}
+
+/** Against the comparison period, only where 0024 returns a previous value; otherwise "No comparison data". */
+export interface FigureChange {
+  comparison: RateComparison;
+  /** Records behind the previous figure. */
+  previousEvidence: number;
+  /** "+4 pp" or "No comparison data" — never an invented 0 pp. */
+  display: string;
+}
+
+export function figureChange(current: number | null, previous: number | null, previousEvidence: number): FigureChange {
+  const comparison = ratePointChange(current, previous);
+  return { comparison, previousEvidence, display: comparison.state === "change" ? formatPoints(comparison) : "No comparison data" };
+}
+
+export interface ComparisonList<T> {
+  /** In the order 0024 returns them (by name / title) — not a ranking. */
+  rows: T[];
+  /** All batches / courses in scope (0024 *_total). */
+  total: number;
+  /** "Showing 10 of 14" when there are more than the rows shown; otherwise null. */
+  shownText: string | null;
+}
+
+function comparisonList<T>(rows: T[], total: number): ComparisonList<T> {
+  return { rows, total, shownText: total > rows.length ? `Showing ${rows.length} of ${total}` : null };
+}
+
+export interface BatchComparisonRow {
+  id: string;
+  code: string;
+  name: string;
+  course: string;
+  students: number;
+  testAvg: EvidenceFigure;
+  testAvgChange: FigureChange;
+  passRate: EvidenceFigure;
+  attendance: EvidenceFigure;
+  attendanceChange: FigureChange;
+  assignmentAvg: EvidenceFigure;
+  /** Completed vs non-withdrawn enrolments now (a CURRENT figure, not the period's); null without enrolments. */
+  completionPct: number | null;
+  completionDisplay: string;
+  /** /admin/batches/[id] */
+  href: string;
+  /** /admin/performance?batch=<id> */
+  performanceHref: string;
+}
+
+export interface CourseComparisonRow {
+  id: string;
+  code: string;
+  title: string;
+  testAvg: EvidenceFigure;
+  testAvgChange: FigureChange;
+  passRate: EvidenceFigure;
+  attendance: EvidenceFigure;
+  assignmentAvg: EvidenceFigure;
+  /** /admin/courses/[id] */
+  href: string;
+}
+
+export function batchComparison(batches: RawBatch[], total: number): ComparisonList<BatchComparisonRow> {
+  return comparisonList(
+    batches.map((b) => ({
+      id: b.id,
+      code: b.code,
+      name: b.name,
+      course: b.course,
+      students: b.students,
+      testAvg: evidenceFigure(b.test_avg, b.results_n),
+      testAvgChange: figureChange(b.test_avg, b.prev_test_avg, b.prev_results_n),
+      passRate: evidenceFigure(b.pass_rate, b.results_n),
+      attendance: evidenceFigure(b.attendance_pct, b.attendance_n),
+      attendanceChange: figureChange(b.attendance_pct, b.prev_attendance_pct, b.prev_attendance_n),
+      assignmentAvg: evidenceFigure(b.assignment_avg, b.assignments_n),
+      completionPct: b.completion_pct,
+      completionDisplay: formatPercent(b.completion_pct),
+      href: `/admin/batches/${encodeURIComponent(b.id)}`,
+      performanceHref: `/admin/performance?batch=${encodeURIComponent(b.id)}`,
+    })),
+    total
+  );
+}
+
+export function courseComparison(courses: RawCourse[], total: number): ComparisonList<CourseComparisonRow> {
+  return comparisonList(
+    courses.map((c) => ({
+      id: c.id,
+      code: c.code,
+      title: c.title,
+      testAvg: evidenceFigure(c.test_avg, c.results_n),
+      testAvgChange: figureChange(c.test_avg, c.prev_test_avg, c.prev_results_n),
+      passRate: evidenceFigure(c.pass_rate, c.results_n),
+      attendance: evidenceFigure(c.attendance_pct, c.attendance_n),
+      assignmentAvg: evidenceFigure(c.assignment_avg, c.assignments_n),
+      href: `/admin/courses/${encodeURIComponent(c.id)}`,
+    })),
+    total
+  );
 }
 
 const hasAny = (t: RawTotals) => t.results + t.attendance_marked + t.assignments_scored > 0;
@@ -642,6 +768,8 @@ export function buildAnalyticsPanels(raw: DashboardAnalyticsRaw, periodKey: stri
     })),
     topics: raw.topics.map((t) => ({ moduleId: t.module_id, title: t.title, percent: t.percent, answers: t.answers, band: t.band })),
     resultsInPeriod: cur.results,
+    batches: batchComparison(raw.batches, raw.batches_total),
+    courses: courseComparison(raw.courses, raw.courses_total),
     datasets: {
       batches: raw.batches,
       batches_total: raw.batches_total,

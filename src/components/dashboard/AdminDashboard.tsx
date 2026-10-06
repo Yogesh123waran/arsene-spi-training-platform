@@ -34,6 +34,8 @@ import {
   formatPoints,
   type AnalyticsPeriod,
   type DashboardAnalyticsResult,
+  type EvidenceFigure,
+  type FigureChange,
   type RateComparison,
 } from "@/lib/dashboard/analytics";
 
@@ -506,6 +508,142 @@ async function WeakTopicsPanel({ analytics }: { analytics: Promise<DashboardAnal
   );
 }
 
+// ---------------------------------------------------------------- batch / course comparison (D2b-2B: period-based, streamed)
+
+/** pp change only where 0024 has a previous figure; otherwise "No comparison data" (never 0 pp). */
+function ChangeText({ change }: { change: FigureChange }) {
+  if (change.comparison.state !== "change") return <span className="text-ink-faint">No comparison data</span>;
+  return (
+    <span>
+      <ComparisonText c={change.comparison} /> <span className="text-ink-faint">· {change.previousEvidence} before</span>
+    </span>
+  );
+}
+
+/** One figure: the value (or "Insufficient data (n)"), the records behind it, and its change when there is one. */
+function FigureItem({ label, figure, noun, change }: { label: string; figure: EvidenceFigure; noun: string; change?: FigureChange }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-2xs text-ink-muted">{label}</dt>
+      <dd className={figure.value === null ? "text-xs text-ink-faint" : "font-mono text-sm font-semibold text-ink"}>{figure.display}</dd>
+      {figure.value !== null && (
+        <dd className="text-2xs text-ink-faint">
+          {figure.evidence} {noun}
+        </dd>
+      )}
+      {change && (
+        <dd className="text-2xs">
+          <ChangeText change={change} />
+        </dd>
+      )}
+    </div>
+  );
+}
+
+function ShownText({ text, order }: { text: string | null; order: "name" | "title" }) {
+  return text ? <p className="mt-3 text-2xs text-ink-faint">{text} · listed by {order}</p> : null;
+}
+
+async function BatchComparisonPanel({ analytics }: { analytics: Promise<DashboardAnalyticsResult> }) {
+  const { panels } = await analytics;
+  return (
+    <Panel
+      id="dash-batches"
+      title="Batch comparison"
+      description={panels.status === "ok" ? `${periodText(panels.data.period)} · listed by name` : undefined}
+      action={{ href: "/admin/batches", label: "View all batches" }}
+    >
+      {panels.status === "error" ? (
+        <AnalyticsUnavailable />
+      ) : panels.data.batches.rows.length === 0 ? (
+        <Compact
+          title="No batch activity in this period"
+          description={`No batch has released test results, attendance records or scored assignments between ${panels.data.period.rangeText}, and no batch is ongoing.`}
+        />
+      ) : (
+        <>
+          <ul className="divide-y divide-surface-border">
+            {panels.data.batches.rows.map((b) => (
+              <li key={b.id} className="py-3 first:pt-0 last:pb-0">
+                <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+                  <div className="min-w-0">
+                    <Link href={b.href} className="break-words text-sm font-medium text-ink hover:underline">
+                      {b.name}
+                    </Link>
+                    <p className="break-words text-2xs text-ink-faint">
+                      <span className="font-mono">{b.code}</span> · {b.course} · {b.students} students enrolled (current)
+                    </p>
+                  </div>
+                  <Link href={b.performanceHref} className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-signal-blue hover:underline">
+                    View performance<span className="sr-only"> of {b.name}</span> <ArrowRight className="h-3 w-3" aria-hidden />
+                  </Link>
+                </div>
+                <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
+                  <FigureItem label="Test average" figure={b.testAvg} noun="released results" change={b.testAvgChange} />
+                  <FigureItem label="Pass rate" figure={b.passRate} noun="released results" />
+                  <FigureItem label="Attendance" figure={b.attendance} noun="attendance records" change={b.attendanceChange} />
+                  <FigureItem label="Assignment average" figure={b.assignmentAvg} noun="scored submissions" />
+                  <div className="min-w-0">
+                    <dt className="text-2xs text-ink-muted">Completion (current)</dt>
+                    <dd className="font-mono text-sm font-semibold text-ink">{b.completionDisplay}</dd>
+                    <dd className="text-2xs text-ink-faint">of enrolments now, not this period</dd>
+                  </div>
+                </dl>
+              </li>
+            ))}
+          </ul>
+          <ShownText text={panels.data.batches.shownText} order="name" />
+        </>
+      )}
+    </Panel>
+  );
+}
+
+async function CourseComparisonPanel({ analytics }: { analytics: Promise<DashboardAnalyticsResult> }) {
+  const { panels } = await analytics;
+  return (
+    <Panel
+      id="dash-courses"
+      title="Course comparison"
+      description={panels.status === "ok" ? `${periodText(panels.data.period)} · listed by title` : undefined}
+      action={{ href: "/admin/courses", label: "View all courses" }}
+    >
+      {panels.status === "error" ? (
+        <AnalyticsUnavailable />
+      ) : panels.data.courses.rows.length === 0 ? (
+        <Compact
+          title="No course activity in this period"
+          description={`No course has a batch with released test results, attendance records or scored assignments between ${panels.data.period.rangeText}, or an ongoing batch.`}
+        />
+      ) : (
+        <>
+          <ul className="divide-y divide-surface-border">
+            {panels.data.courses.rows.map((c) => (
+              <li key={c.id} className="py-3 first:pt-0 last:pb-0">
+                <div className="min-w-0">
+                  <Link href={c.href} className="break-words text-sm font-medium text-ink hover:underline">
+                    {c.title}
+                  </Link>
+                  <p className="text-2xs text-ink-faint">
+                    <span className="font-mono">{c.code}</span>
+                  </p>
+                </div>
+                <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
+                  <FigureItem label="Test average" figure={c.testAvg} noun="released results" change={c.testAvgChange} />
+                  <FigureItem label="Pass rate" figure={c.passRate} noun="released results" />
+                  <FigureItem label="Attendance" figure={c.attendance} noun="attendance records" />
+                  <FigureItem label="Assignment average" figure={c.assignmentAvg} noun="scored submissions" />
+                </dl>
+              </li>
+            ))}
+          </ul>
+          <ShownText text={panels.data.courses.shownText} order="title" />
+        </>
+      )}
+    </Panel>
+  );
+}
+
 // ---------------------------------------------------------------- pending approvals (completion recommendations)
 
 function PendingApprovalsPanel({ section }: { section: AdminDashboardData["approvals"] }) {
@@ -692,6 +830,14 @@ export function AdminDashboard({ data, analytics }: { data: AdminDashboardData; 
         </Suspense>
         <Suspense key={`health-${data.period.key}`} fallback={<PanelLoading id="dash-health" title="Training health" />}>
           <TrainingHealthPanel analytics={analytics} />
+        </Suspense>
+      </div>
+      <div className="grid grid-cols-1 gap-4">
+        <Suspense key={`batches-${data.period.key}`} fallback={<PanelLoading id="dash-batches" title="Batch comparison" />}>
+          <BatchComparisonPanel analytics={analytics} />
+        </Suspense>
+        <Suspense key={`courses-${data.period.key}`} fallback={<PanelLoading id="dash-courses" title="Course comparison" />}>
+          <CourseComparisonPanel analytics={analytics} />
         </Suspense>
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">

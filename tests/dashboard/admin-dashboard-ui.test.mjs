@@ -4,7 +4,8 @@
 // or emoji, no private fields, links only to existing workflows. D2b-2A deliberately changes three earlier
 // rules: the header now has a real period selector (server links), the performance summary and Weak Topics
 // are period-based from dashboard_analytics (streamed in their own Suspense boundaries), and Training
-// health shows six lines with an overall worst-line status.
+// health shows six lines with an overall worst-line status. D2b-2B adds the batch and course comparison panels
+// (same single response, name order, no status bands, links to the existing batch / course / performance pages).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -87,7 +88,7 @@ test("accessibility: one h1 (PageHeader), each section an h2 inside a labelled r
   assert.match(view, /<section aria-labelledby=\{id\}/);
   assert.match(view, /<h2 id=\{id\} className=/);
   for (const id of ["dash-metrics", "dash-attention"]) assert.match(view, new RegExp(`<h2 id="${id}"`), id);
-  for (const id of ["dash-today", "dash-upcoming-classes", "dash-tests", "dash-overview", "dash-performance", "dash-health", "dash-topics", "dash-activity", "dash-actions", "dash-approvals"]) {
+  for (const id of ["dash-today", "dash-upcoming-classes", "dash-tests", "dash-overview", "dash-performance", "dash-health", "dash-topics", "dash-batches", "dash-courses", "dash-activity", "dash-actions", "dash-approvals"]) {
     assert.match(view, new RegExp(`id="${id}"`), id);
   }
   assert.match(view, /<figure aria-labelledby="dash-trend-caption">/);
@@ -99,7 +100,7 @@ test("accessibility: one h1 (PageHeader), each section an h2 inside a labelled r
   assert.match(view, /aria-busy="true"/, "skeletons announce loading");
   assert.match(view, /\{t\.state === "open" \? "Open" : "Scheduled"\}/, "status as text, not colour alone");
   assert.match(view, />\s*Unread\s*</);
-  for (const label of ["View all classes", "View all tests", "View all batches", "View detailed performance", "View all notifications", "View module performance", "Review all completions"]) {
+  for (const label of ["View all classes", "View all tests", "View all batches", "View detailed performance", "View all notifications", "View module performance", "Review all completions", "View all courses", "View performance"]) {
     assert.ok(view.includes(label), label);
   }
   assert.match(view, /<Badge tone=\{BAND_TONE\[t\.band\]\}>\{TOPIC_BAND_LABEL\[t\.band\]\}<\/Badge>/, "topic band as text, not only the bar colour");
@@ -146,12 +147,12 @@ test("training health: six lines, each with its reason; overall worst line wins 
   assert.match(view, /Based on \{health\.data\.overall\.basedOn\} of \{health\.data\.overall\.total\} indicators/);
   assert.match(view, /no_data: "neutral", unavailable: "neutral"/, "No data / Unavailable are neutral, not failures");
   assert.doesNotMatch(view, /health score|score\}|\/100/i, "no numeric score");
-  assert.doesNotMatch(view, /top 5|top performers|ranking|course-wise|batch-wise/i, "D2b-2B / 2C not built yet");
+  assert.doesNotMatch(view, /top 5|top performers|ranking|course-wise|batch-wise/i, "no rankings; D2b-2C not built yet");
 });
 
 test("streaming and isolation: each analytics panel has its own Suspense boundary and a fixed unavailable state; current-state sections render without them", () => {
   const view = strip(src(VIEW));
-  for (const [panel, key] of [["PerformancePanel", "performance"], ["TrainingHealthPanel", "health"], ["WeakTopicsPanel", "topics"]]) {
+  for (const [panel, key] of [["PerformancePanel", "performance"], ["TrainingHealthPanel", "health"], ["WeakTopicsPanel", "topics"], ["BatchComparisonPanel", "batches"], ["CourseComparisonPanel", "courses"]]) {
     assert.match(view, new RegExp(`<Suspense key=\\{\`${key}-\\$\\{data\\.period\\.key\\}\`\\} fallback=\\{<PanelLoading `), `${panel}: own fallback, re-shown when the period changes`);
     assert.match(view, new RegExp(`async function ${panel}\\(`), `${panel} awaits the analytics promise itself`);
   }
@@ -168,7 +169,7 @@ test("sections: empty and error states; attention hidden when nothing needs atte
   for (const t of ["No classes today", "No upcoming classes", "No upcoming tests", "No recent activity"]) assert.ok(view.includes(t), t);
   assert.match(view, /grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6/, "2 / 3 / 4 / 6 metrics per row");
   assert.match(view, /grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3/, "1 / 2 / 3 content columns");
-  const order = ["<Metrics", "<Attention", "<PerformancePanel", "<TrainingHealthPanel", "<Overview", "<WeakTopicsPanel", "<TodayClasses", "<UpcomingClasses", "<UpcomingTests", "<Activity", "<QuickActions", "<PendingApprovalsPanel"];
+  const order = ["<Metrics", "<Attention", "<PerformancePanel", "<TrainingHealthPanel", "<BatchComparisonPanel", "<CourseComparisonPanel", "<Overview", "<WeakTopicsPanel", "<TodayClasses", "<UpcomingClasses", "<UpcomingTests", "<Activity", "<QuickActions", "<PendingApprovalsPanel"];
   const positions = order.map((s) => view.lastIndexOf(s));
   assert.ok(positions.every((p) => p >= 0));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions, "attention right after the metrics; reading order matches the layout");
@@ -181,6 +182,7 @@ test("quick actions and links: only existing /admin routes, no new mutation work
   const routes = {
     "/admin/users": "src/app/admin/users/page.tsx",
     "/admin/batches": "src/app/admin/batches/page.tsx",
+    "/admin/courses": "src/app/admin/courses/page.tsx",
     "/admin/batches/new": "src/app/admin/batches/new/page.tsx",
     "/admin/classes": "src/app/admin/classes/page.tsx",
     "/admin/classes/new": "src/app/admin/classes/new/page.tsx",
@@ -199,6 +201,12 @@ test("quick actions and links: only existing /admin routes, no new mutation work
   assert.match(view, /href=\{`\/admin\/tests\/\$\{encodeURIComponent\(t\.id\)\}`\}/);
   assert.match(view, /href=\{`\/admin\/certificates\/\$\{encodeURIComponent\(b\.batchId\)\}`\}/);
   assert.ok(exists("src/app/admin/certificates/[batchId]/page.tsx"), "the per-batch completion page exists");
+  // D2b-2B links (built in the read model): batch / course detail and the Performance page's batch filter
+  assert.ok(view.includes("href: `/admin/batches/${encodeURIComponent(b.id)}`"), "batch detail link");
+  assert.ok(view.includes("performanceHref: `/admin/performance?batch=${encodeURIComponent(b.id)}`"), "Performance page, filtered to the batch");
+  assert.ok(view.includes("href: `/admin/courses/${encodeURIComponent(c.id)}`"), "course detail link");
+  assert.ok(exists("src/app/admin/batches/[batchId]/page.tsx") && exists("src/app/admin/courses/[courseId]/page.tsx"), "the detail pages exist");
+  assert.ok(src("src/app/admin/performance/page.tsx").includes("batchId: first(searchParams.batch)"), "the Performance page reads ?batch=");
 });
 
 test("boundary: session client only — no service role, no admin client, no writes; exactly ONE database function call (dashboard_analytics, in the repository)", () => {
@@ -233,4 +241,46 @@ test("the old mock dashboard is gone from the Super Admin page; the shared KpiCa
   assert.doesNotMatch(src(PAGE) + src(VIEW), /dashboard\.mock|adminKpis|recentTestResults|recentActivity|courseProgressSegments/);
   assert.match(src("src/components/dashboard/KpiCard.tsx"), /trend: number|trend,/i, "KpiCard keeps its existing contract for the trainer/student portals");
   assert.match(src("src/components/layout/PortalDashboard.tsx"), /KpiDatum/);
+});
+
+test("batch and course comparison (D2b-2B): from the one analytics response, name order, evidence and comparison wording, current completion, no status bands", () => {
+  const view = strip(src(VIEW));
+  const lib = strip(src(ANALYTICS));
+  const panel = (name, next) => view.slice(view.indexOf(`async function ${name}(`), view.indexOf(next));
+  const batches = panel("BatchComparisonPanel", "async function CourseComparisonPanel(");
+  const courses = panel("CourseComparisonPanel", "function PendingApprovalsPanel(");
+  assert.match(batches, /title="Batch comparison"/);
+  assert.match(courses, /title="Course comparison"/);
+  assert.match(batches, /\{panels\.data\.batches\.rows\.map\(\(b\) =>/);
+  assert.match(courses, /\{panels\.data\.courses\.rows\.map\(\(c\) =>/);
+  for (const p of [batches, courses]) {
+    assert.match(p, /const \{ panels \} = await analytics;/, "the shared analytics promise — no further call");
+    assert.match(p, /panels\.status === "error" \? \(\s*<AnalyticsUnavailable \/>/, "the existing unavailable state");
+    assert.doesNotMatch(p, /Badge|BAND_TONE|HEALTH_LABEL|TOPIC_BAND_LABEL|Healthy|Watch|Attention/, "no status bands on batches / courses");
+    assert.doesNotMatch(p, /\.sort\(|\.reverse\(/, "rows are never re-ordered");
+    assert.doesNotMatch(p, /overflow-x|min-w-\[|whitespace-nowrap|<table|<Table/, "no wide table: cards that wrap at 400 px");
+  }
+  assert.match(batches, /title="No batch activity in this period"/);
+  assert.match(courses, /title="No course activity in this period"/);
+  assert.match(batches, /<dt className="text-2xs text-ink-muted">Completion \(current\)<\/dt>/, "completion is labelled a current figure");
+  assert.match(batches, /of enrolments now, not this period/);
+  assert.match(batches, /<Link href=\{b\.href\}/);
+  assert.match(batches, /<Link href=\{b\.performanceHref\}[\s\S]*?View performance<span className="sr-only"> of \{b\.name\}<\/span>/, "descriptive per-row link");
+  assert.match(courses, /<Link href=\{c\.href\}/);
+  assert.match(batches, /listed by name/);
+  assert.match(courses, /listed by title/);
+  assert.match(view, /<ShownText text=\{panels\.data\.batches\.shownText\} order="name" \/>/);
+  assert.match(view, /<ShownText text=\{panels\.data\.courses\.shownText\} order="title" \/>/);
+  // responsive: 2 figures per row on a phone, more as the width allows
+  assert.match(batches, /grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-5/);
+  assert.match(courses, /grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4/);
+  assert.match(view, /<div className="grid grid-cols-1 gap-4">\s*<Suspense key=\{`batches-/);
+  // wording comes from the read model: insufficient evidence and missing comparisons are explicit
+  assert.match(lib, /`Insufficient data \(\$\{evidence\}\)`/);
+  assert.match(lib, /comparison\.state === "change" \? formatPoints\(comparison\) : "No comparison data"/);
+  assert.match(view, /if \(change\.comparison\.state !== "change"\) return <span className="text-ink-faint">No comparison data<\/span>;/);
+  assert.match(lib, /shownText: total > rows\.length \? `Showing \$\{rows\.length\} of \$\{total\}` : null/);
+  assert.doesNotMatch(lib.slice(lib.indexOf("export function batchComparison"), lib.indexOf("const hasAny")), /\.sort\(/, "no ranking in the read model");
+  // D2b-2C / 2D not built
+  assert.doesNotMatch(view, /datasets\.|students\.top|\.improving|\.declining|\.delivery|\.enrolment/, "student / progress panels are not part of D2b-2B");
 });

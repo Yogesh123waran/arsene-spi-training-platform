@@ -176,3 +176,93 @@ test("overall: worst line wins (Attention > Watch > Healthy); No data and Unavai
   assert.deepEqual(a.unavailableAnalyticsHealth().map((l) => l.status), ["unavailable", "unavailable", "unavailable", "unavailable"]);
   assert.deepEqual(Object.keys(lib.HEALTH_LABEL), ["healthy", "watch", "attention", "no_data", "unavailable"], "one health vocabulary");
 });
+
+// ---------------------------------------------------------------- D2b-2B: batch / course comparison
+
+const batchRow = (o = {}) => ({
+  id: "b1", code: "B-1", name: "Batch One", course_id: "c1", course: "Valves", students: 5,
+  attendance_pct: 80, attendance_n: 15, test_avg: 73.75, pass_rate: 90, results_n: 20, assignment_avg: 78.57, assignments_n: 7,
+  completion_pct: 20, prev_test_avg: 60, prev_results_n: 5, prev_attendance_pct: null, prev_attendance_n: 2, ...o,
+});
+const courseRow = (o = {}) => ({
+  id: "c1", code: "C-1", title: "Valves", test_avg: 74.57, pass_rate: 91.3, results_n: 23, attendance_pct: 80, attendance_n: 15,
+  assignment_avg: 78.57, assignments_n: 7, prev_test_avg: 60, prev_results_n: 5, ...o,
+});
+
+test("batch comparison read model: figures with their evidence, pp change only with a previous figure, completion as a CURRENT figure, existing links", () => {
+  const p = a.buildAnalyticsPanels(a.parseAnalytics(rawAnalytics()), "this_month");
+  assert.equal(p.batches.total, 1);
+  assert.equal(p.batches.shownText, null, "all rows shown → no 'Showing X of N'");
+  const [b] = p.batches.rows;
+  assert.deepEqual([b.id, b.code, b.name, b.course, b.students], ["b1", "B-1", "Batch One", "Valves", 5]);
+  assert.deepEqual(b.testAvg, { value: 73.75, evidence: 20, display: "73.8%" });
+  assert.equal(b.testAvgChange.display, "+13.8 pp");
+  assert.equal(b.testAvgChange.comparison.previous, 60);
+  assert.equal(b.testAvgChange.previousEvidence, 5);
+  assert.deepEqual(b.passRate, { value: 90, evidence: 20, display: "90%" });
+  assert.deepEqual(b.attendance, { value: 80, evidence: 15, display: "80%" });
+  assert.equal(b.attendanceChange.display, "No comparison data", "previous attendance below the evidence minimum");
+  assert.equal(b.attendanceChange.comparison.points, null, "never an invented 0 pp");
+  assert.equal(b.attendanceChange.previousEvidence, 2);
+  assert.deepEqual(b.assignmentAvg, { value: 78.57, evidence: 7, display: "78.6%" });
+  assert.equal(b.completionPct, 20);
+  assert.equal(b.completionDisplay, "20%");
+  assert.equal(b.href, "/admin/batches/b1");
+  assert.equal(b.performanceHref, "/admin/performance?batch=b1");
+  assert.ok(!("band" in b) && !("status" in b), "no Healthy / Watch / Attention on a batch");
+});
+
+test("course comparison read model: figures with their evidence; only the test average has a comparison; course detail link", () => {
+  const p = a.buildAnalyticsPanels(a.parseAnalytics(rawAnalytics()), "this_month");
+  assert.equal(p.courses.total, 1);
+  assert.equal(p.courses.shownText, null);
+  const [c] = p.courses.rows;
+  assert.deepEqual([c.id, c.code, c.title], ["c1", "C-1", "Valves"]);
+  assert.deepEqual(c.testAvg, { value: 74.57, evidence: 23, display: "74.6%" });
+  assert.equal(c.testAvgChange.display, "+14.6 pp");
+  assert.deepEqual(c.passRate, { value: 91.3, evidence: 23, display: "91.3%" });
+  assert.deepEqual(c.attendance, { value: 80, evidence: 15, display: "80%" });
+  assert.deepEqual(c.assignmentAvg, { value: 78.57, evidence: 7, display: "78.6%" });
+  assert.ok(!("attendanceChange" in c) && !("passRateChange" in c), "0024 has no previous course attendance / pass rate");
+  assert.equal(c.href, "/admin/courses/c1");
+  assert.ok(!("band" in c) && !("status" in c));
+});
+
+test("comparison: insufficient evidence → 'Insufficient data (n)'; missing previous → 'No comparison data'; ids are URL-encoded", () => {
+  const b = a.batchComparison([batchRow({ id: "a/b?c", test_avg: null, pass_rate: null, results_n: 3, attendance_pct: null, attendance_n: 0, assignment_avg: null, assignments_n: 4, completion_pct: null, prev_test_avg: null })], 1).rows[0];
+  assert.deepEqual(b.testAvg, { value: null, evidence: 3, display: "Insufficient data (3)" });
+  assert.equal(b.passRate.display, "Insufficient data (3)");
+  assert.equal(b.attendance.display, "Insufficient data (0)", "no records is not 0 %");
+  assert.equal(b.assignmentAvg.display, "Insufficient data (4)");
+  assert.equal(b.testAvgChange.display, "No comparison data");
+  assert.equal(b.testAvgChange.comparison.points, null);
+  assert.equal(b.completionDisplay, "—", "no enrolments → '—', never 0 %");
+  assert.equal(b.href, "/admin/batches/a%2Fb%3Fc");
+  assert.equal(b.performanceHref, "/admin/performance?batch=a%2Fb%3Fc");
+  // current present, previous missing; current missing, previous present — both 'No comparison data'
+  assert.equal(a.figureChange(70, null, 0).display, "No comparison data");
+  assert.equal(a.figureChange(null, 70, 9).display, "No comparison data");
+  assert.equal(a.figureChange(70, 70, 9).display, "0 pp", "a real zero change only when both sides exist");
+  assert.equal(a.figureChange(61.25, 70, 9).display, "−8.8 pp");
+  const c = a.courseComparison([courseRow({ test_avg: null, results_n: 4, prev_test_avg: 50 })], 1).rows[0];
+  assert.equal(c.testAvg.display, "Insufficient data (4)");
+  assert.equal(c.testAvgChange.display, "No comparison data");
+});
+
+test("comparison: name / title order preserved exactly as returned (never re-ranked); 'Showing X of N' when the total is larger; empty lists", () => {
+  const rows = [batchRow({ id: "b1", name: "Alpha", test_avg: 40 }), batchRow({ id: "b2", name: "Bravo", test_avg: 95 }), batchRow({ id: "b3", name: "Charlie", test_avg: 70 })];
+  const list = a.batchComparison(rows, 14);
+  assert.deepEqual(list.rows.map((r) => r.name), ["Alpha", "Bravo", "Charlie"], "not sorted by any figure");
+  assert.equal(list.total, 14);
+  assert.equal(list.shownText, "Showing 3 of 14");
+  const ten = a.batchComparison(Array.from({ length: 10 }, (_, i) => batchRow({ id: `b${i}`, name: `B${i}` })), 23);
+  assert.equal(ten.shownText, "Showing 10 of 23");
+  assert.equal(a.batchComparison(rows, 3).shownText, null);
+  const courses = a.courseComparison([courseRow({ id: "c2", title: "Zeta", test_avg: 99 }), courseRow({ id: "c1", title: "Alpha", test_avg: 10 })], 12);
+  assert.deepEqual(courses.rows.map((r) => r.id), ["c2", "c1"], "the function's order is kept as is");
+  assert.equal(courses.shownText, "Showing 2 of 12");
+  assert.deepEqual(a.batchComparison([], 0), { rows: [], total: 0, shownText: null });
+  assert.deepEqual(a.courseComparison([], 0), { rows: [], total: 0, shownText: null });
+  const empty = a.buildAnalyticsPanels(a.parseAnalytics(rawAnalytics({ batches: [], batches_total: 0, courses: [], courses_total: 0 })), "this_month");
+  assert.deepEqual([empty.batches.rows.length, empty.courses.rows.length], [0, 0]);
+});

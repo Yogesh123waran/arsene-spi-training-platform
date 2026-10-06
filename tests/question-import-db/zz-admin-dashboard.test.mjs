@@ -167,7 +167,7 @@ test("D2a RLS: the same reads under a student's or an unrelated trainer's sessio
 
 // ---------------------------------------------------------------- D2b-2A: the real dashboard_analytics response through the repository
 
-test("D2b-2A: getAnalytics returns the real 0024 response through the Super Admin's session, and it passes the app's validator", async () => {
+test("D2b-2A / 2B: getAnalytics returns the real 0024 response through the Super Admin's session, and it passes the app's validator; batch / course rows keep its order", async () => {
   const today = await db.admin("select to_char((now() at time zone 'Asia/Kolkata')::date, 'YYYY-MM-DD')");
   for (const key of periods.PERIOD_KEYS) {
     const range = periods.periodRange(key, today);
@@ -180,6 +180,26 @@ test("D2b-2A: getAnalytics returns the real 0024 response through the Super Admi
     assert.equal(panels.performance.length, 4);
     assert.ok(panels.trend.length >= 1);
     assert.equal(analytics.analyticsHealth(raw.health).length, 4);
+    // D2b-2B: batch / course comparison from the same response — the function's order kept, bounded, totals from the database
+    for (const [list, rawRows, total, idOf, nameOf] of [
+      [panels.batches, raw.batches, raw.batches_total, (r) => r.id, (r) => r.name],
+      [panels.courses, raw.courses, raw.courses_total, (r) => r.id, (r) => r.title],
+    ]) {
+      assert.ok(list.rows.length <= analytics.ANALYTICS_LIST_LIMIT, `${key}: at most ${analytics.ANALYTICS_LIST_LIMIT} rows`);
+      assert.deepEqual(list.rows.map(idOf), rawRows.map(idOf), `${key}: rows in the function's order, never re-ranked`);
+      const names = rawRows.map(nameOf);
+      assert.deepEqual(names, [...names].sort((x, y) => (x < y ? -1 : x > y ? 1 : 0)), `${key}: the function returns name order`);
+      assert.equal(list.total, total);
+      assert.equal(list.shownText, total > list.rows.length ? `Showing ${list.rows.length} of ${total}` : null);
+    }
+    assert.ok(raw.batches_total >= 1, `${key}: the ongoing AD Batch is always in scope`);
+    assert.ok(raw.batches.some((b) => b.id === U.ad_B) || raw.batches_total > raw.batches.length, `${key}: AD Batch listed or beyond the limit`);
+    for (const b of panels.batches.rows) {
+      assert.equal(b.href, `/admin/batches/${b.id}`);
+      assert.equal(b.performanceHref, `/admin/performance?batch=${b.id}`);
+      assert.ok(b.testAvg.value !== null || b.testAvg.display === `Insufficient data (${b.testAvg.evidence})`);
+    }
+    for (const c of panels.courses.rows) assert.equal(c.href, `/admin/courses/${c.id}`);
   }
 });
 
