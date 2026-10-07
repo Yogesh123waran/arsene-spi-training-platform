@@ -6,6 +6,7 @@
  *   buildAnalyticsPanels() the period-based read models the page renders
  *   batch / course comparison (D2b-2B): name order as returned, evidence, pp change
  *   student performance (D2b-2C): students.current (0027) in database rank order, trend arrows at ±1 pp
+ *   course progress (D2b-2D): delivery / enrolment (current state) joined by course_id, never re-sorted
  *   comparison helpers    rates in percentage points; counts as % change
  *   health indicators     attendance / assessment / assignments / students
  *                         (Q2 thresholds) and the overall worst-line-wins
@@ -645,7 +646,9 @@ export interface AnalyticsPanels {
   courses: ComparisonList<CourseComparisonRow>;
   /** D2b-2C: Student Performance (Top 5) — the current ranking (0027), database order, with the selected period's trend. */
   students: StudentPerformance;
-  /** Kept for D2b-2D (progress panels); batch / course / student rows are rendered from `batches` / `courses` / `students`. */
+  /** D2b-2D: Course Progress — current-state class delivery and enrolment completion per course (independent of the period). */
+  progress: CourseProgress;
+  /** The raw lists behind the panels (kept for reference; the view renders the read models above). */
   datasets: Pick<DashboardAnalyticsRaw, "batches" | "batches_total" | "courses" | "courses_total" | "students" | "delivery" | "delivery_total" | "enrolment" | "enrolment_total">;
 }
 
@@ -853,6 +856,88 @@ export function studentPerformance(current: RawCurrentStudent[], window: { from:
 }
 
 
+// -------------------------------------------------------------------
+// Course progress (D2b-2D) — delivery[] / enrolment[] of 0024 (current state, not the period)
+// -------------------------------------------------------------------
+
+/** Dashboard attendance vs the Performance Tracker: both definitions stay as they are; the dashboard says so. */
+export const ATTENDANCE_DEFINITION_NOTE =
+  "Attendance on this dashboard excludes excused absences; the Performance Tracker counts excused absences as attended.";
+
+/** Class delivery for one course, exactly as 0024 counts it (upcoming / ongoing batches, cancelled classes excluded). */
+export interface CourseDelivery {
+  planned: number;
+  delivered: number;
+  overdue: number;
+  /** delivered / planned × 100 (one decimal); null when nothing is planned — never 0 %. */
+  percent: number | null;
+  /** "75%" or "—" */
+  percentDisplay: string;
+}
+
+/** Enrolment completion for one course, exactly as 0024 counts it (completed vs non-withdrawn enrolments). */
+export interface CourseEnrolment {
+  completed: number;
+  active: number;
+  /** completed / active × 100 (one decimal); null without active enrolments — never 0 %. */
+  percent: number | null;
+  percentDisplay: string;
+}
+
+export interface CourseProgressRow {
+  courseId: string;
+  course: string;
+  /** null: the course is not in the returned delivery list (none in scope, or beyond the list — see shownText). */
+  delivery: CourseDelivery | null;
+  /** null: the course is not in the returned enrolment list (none in scope, or beyond the list — see shownText). */
+  enrolment: CourseEnrolment | null;
+}
+
+export interface CourseProgress {
+  /** Delivery's order first (as 0024 returns it), then courses found only in the enrolment list, in its order. Never re-sorted. */
+  rows: CourseProgressRow[];
+  /** Courses with class delivery in scope (0024 delivery_total). */
+  deliveryTotal: number;
+  /** Courses with enrolments in scope (0024 enrolment_total). */
+  enrolmentTotal: number;
+  /** "Delivery: showing 10 of 14 courses" when the delivery list is a subset; otherwise null. */
+  deliveryShownText: string | null;
+  /** "Enrolment: showing 10 of 12 courses" when the enrolment list is a subset; otherwise null. */
+  enrolmentShownText: string | null;
+  /** Neither list has a course. */
+  empty: boolean;
+}
+
+/** Joined by course_id (never by position); delivery and enrolment figures used exactly as returned. */
+export function courseProgress(delivery: RawDelivery[], deliveryTotal: number, enrolment: RawEnrolment[], enrolmentTotal: number): CourseProgress {
+  const toDelivery = (d: RawDelivery): CourseDelivery => {
+    const percent = progressPercent(d.delivered, d.planned);
+    return { planned: d.planned, delivered: d.delivered, overdue: d.overdue, percent, percentDisplay: formatPercent(percent) };
+  };
+  const toEnrolment = (e: RawEnrolment): CourseEnrolment => {
+    const percent = progressPercent(e.completed, e.active);
+    return { completed: e.completed, active: e.active, percent, percentDisplay: formatPercent(percent) };
+  };
+  const enrolmentById = new Map(enrolment.map((e) => [e.course_id, e]));
+  const deliveryIds = new Set(delivery.map((d) => d.course_id));
+  const rows: CourseProgressRow[] = [
+    ...delivery.map((d) => {
+      const e = enrolmentById.get(d.course_id);
+      return { courseId: d.course_id, course: d.course, delivery: toDelivery(d), enrolment: e ? toEnrolment(e) : null };
+    }),
+    ...enrolment.filter((e) => !deliveryIds.has(e.course_id)).map((e) => ({ courseId: e.course_id, course: e.course, delivery: null, enrolment: toEnrolment(e) })),
+  ];
+  const shown = (label: string, n: number, total: number) => (total > n ? `${label}: showing ${n} of ${total} courses` : null);
+  return {
+    rows,
+    deliveryTotal,
+    enrolmentTotal,
+    deliveryShownText: shown("Delivery", delivery.length, deliveryTotal),
+    enrolmentShownText: shown("Enrolment", enrolment.length, enrolmentTotal),
+    empty: rows.length === 0,
+  };
+}
+
 const hasAny = (t: RawTotals) => t.results + t.attendance_marked + t.assignments_scored > 0;
 
 export function buildAnalyticsPanels(raw: DashboardAnalyticsRaw, periodKey: string): AnalyticsPanels {
@@ -902,6 +987,7 @@ export function buildAnalyticsPanels(raw: DashboardAnalyticsRaw, periodKey: stri
     batches: batchComparison(raw.batches, raw.batches_total),
     courses: courseComparison(raw.courses, raw.courses_total),
     students: studentPerformance(raw.students.current, raw.students.current_window, PERIOD_LABEL[key]),
+    progress: courseProgress(raw.delivery, raw.delivery_total, raw.enrolment, raw.enrolment_total),
     datasets: {
       batches: raw.batches,
       batches_total: raw.batches_total,

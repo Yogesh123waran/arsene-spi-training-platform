@@ -350,3 +350,69 @@ test("student performance: no student with 3 or more released results → the in
   assert.equal(p.caption, "Current ranking: last 366 days · trend: Last 3 months vs previous");
   assert.equal(a.buildAnalyticsPanels(a.parseAnalytics(rawAnalytics()), "this_month").students.insufficient, false);
 });
+
+// ---------------------------------------------------------------- D2b-2D: Course Progress — delivery[] / enrolment[] (current state)
+
+const del = (id, planned, delivered, overdue) => ({ course_id: id, course: `Course ${id}`, planned, delivered, overdue });
+const enr = (id, completed, active) => ({ course_id: id, course: `Course ${id}`, completed, active });
+const withProgress = (delivery, delivery_total, enrolment, enrolment_total) => ({ ...rawAnalytics(), delivery, delivery_total, enrolment, enrolment_total });
+
+test("course progress read model: delivery and enrolment joined by course_id; delivered / planned and completed / active computed once from the counts", () => {
+  const p = a.buildAnalyticsPanels(a.parseAnalytics(rawAnalytics()), "this_month").progress;
+  assert.deepEqual(p.rows, [{
+    courseId: "c1", course: "Valves",
+    delivery: { planned: 5, delivered: 3, overdue: 1, percent: 60, percentDisplay: "60%" },
+    enrolment: { completed: 4, active: 8, percent: 50, percentDisplay: "50%" },
+  }]);
+  assert.deepEqual([p.deliveryTotal, p.enrolmentTotal, p.deliveryShownText, p.enrolmentShownText, p.empty], [1, 1, null, null, false]);
+  // one decimal, from the counts (2 / 3 → 66.7 %, 1 / 3 → 33.3 %)
+  const x = a.courseProgress([del("a", 3, 2, 0)], 1, [enr("a", 1, 3)], 1).rows[0];
+  assert.deepEqual([x.delivery.percent, x.delivery.percentDisplay, x.enrolment.percent, x.enrolment.percentDisplay], [66.7, "66.7%", 33.3, "33.3%"]);
+});
+
+test("course progress: courses in both lists, only in delivery, only in enrolment — none discarded, never matched by position; authoritative order kept", () => {
+  // Different course sets and different positions: b is 2nd in delivery but 1st in enrolment.
+  const p = a.courseProgress([del("a", 4, 4, 0), del("b", 8, 6, 2), del("d", 2, 0, 1)], 3, [enr("b", 3, 10), enr("c", 5, 5), enr("a", 0, 7)], 3);
+  assert.deepEqual(p.rows.map((r) => [r.courseId, r.delivery?.percentDisplay ?? null, r.delivery?.overdue ?? null, r.enrolment?.percentDisplay ?? null]), [
+    ["a", "100%", 0, "0%"],   // both lists (enrolment matched by id, not by position); 0 / 7 is a real 0 %
+    ["b", "75%", 2, "30%"],   // both lists
+    ["d", "0%", 1, null],     // delivery only (0 of 2 delivered is a real 0 %)
+    ["c", null, null, "100%"], // enrolment only — appended after the delivery order, in the enrolment order
+  ]);
+  assert.equal(p.rows.find((r) => r.courseId === "d").enrolment, null);
+  assert.equal(p.rows.find((r) => r.courseId === "c").delivery, null);
+});
+
+test("course progress: no denominator → null and '—', never 0 %; empty lists → the empty state", () => {
+  const p = a.courseProgress([del("a", 0, 0, 0)], 1, [enr("a", 0, 0)], 1);
+  assert.deepEqual([p.rows[0].delivery.percent, p.rows[0].delivery.percentDisplay, p.rows[0].enrolment.percent, p.rows[0].enrolment.percentDisplay], [null, "—", null, "—"]);
+  assert.deepEqual(a.courseProgress([], 0, [], 0), { rows: [], deliveryTotal: 0, enrolmentTotal: 0, deliveryShownText: null, enrolmentShownText: null, empty: true });
+  const onlyEnrolment = a.courseProgress([], 0, [enr("a", 1, 2)], 1);
+  assert.deepEqual([onlyEnrolment.empty, onlyEnrolment.rows[0].delivery, onlyEnrolment.rows[0].enrolment.percentDisplay], [false, null, "50%"]);
+  const onlyDelivery = a.courseProgress([del("a", 2, 1, 0)], 1, [], 0);
+  assert.deepEqual([onlyDelivery.empty, onlyDelivery.rows[0].enrolment, onlyDelivery.rows[0].delivery.percentDisplay], [false, null, "50%"]);
+});
+
+test("course progress: 'Showing X of N' from delivery_total / enrolment_total when a list is a subset", () => {
+  const p = a.courseProgress([1, 2, 3].map((n) => del(`d${n}`, 4, 2, 0)), 14, [1, 2].map((n) => enr(`e${n}`, 1, 2)), 12);
+  assert.equal(p.deliveryShownText, "Delivery: showing 3 of 14 courses");
+  assert.equal(p.enrolmentShownText, "Enrolment: showing 2 of 12 courses");
+  assert.deepEqual([p.deliveryTotal, p.enrolmentTotal], [14, 12]);
+  assert.deepEqual([a.courseProgress([del("a", 1, 1, 0)], 1, [], 0).deliveryShownText, a.courseProgress([], 0, [enr("a", 1, 1)], 1).enrolmentShownText], [null, null]);
+});
+
+test("course progress is current state: identical for every dashboard period (the period never enters the read model); parser rejects malformed lists", () => {
+  const raw = a.parseAnalytics(withProgress([del("a", 8, 6, 2)], 1, [enr("a", 3, 10), enr("b", 1, 4)], 2));
+  const all = ["this_month", "previous_month", "last_3_months", "last_6_months", "last_12_months"].map((k) => a.buildAnalyticsPanels(raw, k).progress);
+  for (const p of all) assert.deepEqual(p, all[0]);
+  assert.equal(all[0].rows.length, 2);
+  const bad = (mutate, path) => {
+    const r = rawAnalytics();
+    mutate(r);
+    assert.throws(() => a.parseAnalytics(r), (e) => e instanceof a.AnalyticsShapeError && e.path === path, path);
+  };
+  bad((r) => { r.delivery[0].planned = -1; }, "delivery[0].planned");
+  bad((r) => { r.enrolment[0].active = "8"; }, "enrolment[0].active");
+  bad((r) => { r.delivery_total = 1.5; }, "delivery_total");
+  assert.equal(a.ATTENDANCE_DEFINITION_NOTE, "Attendance on this dashboard excludes excused absences; the Performance Tracker counts excused absences as attended.");
+});

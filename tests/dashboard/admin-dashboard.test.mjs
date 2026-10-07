@@ -550,3 +550,15 @@ test("Student Performance through the service: the period changes only the trend
   assert.deepEqual(year.rows.map((s) => [s.trendDisplay, s.trendDirection]), [["+0.5 pp", "neutral"], ["−0.99 pp", "neutral"], ["+3 pp", "up"]]);
   assert.equal(year.caption, "Current ranking: last 366 days · trend: Last 12 months vs previous");
 });
+
+test("Course Progress through the service (D2b-2D): from the same single analytics response; current state — identical for every period", async () => {
+  const progressFor = async (period) => {
+    const { repo, calls } = fakeRepo();
+    const a = await (await service({ repo }).load(period)).analytics;
+    assert.equal(calls.filter((c) => c[0] === "getAnalytics").length, 1, `${period}: one analytics call, nothing more`);
+    return a.panels.data.progress;
+  };
+  const month = await progressFor("this_month");
+  assert.deepEqual(month.rows.map((r) => [r.courseId, r.course, r.delivery.percentDisplay, r.delivery.overdue, r.enrolment.percentDisplay]), [["c1", "Valves", "60%", 1, "50%"]]);
+  for (const period of ["previous_month", "last_3_months", "last_6_months", "last_12_months"]) assert.deepEqual(await progressFor(period), month, period);
+});

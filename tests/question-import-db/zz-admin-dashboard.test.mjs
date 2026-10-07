@@ -170,6 +170,7 @@ test("D2a RLS: the same reads under a student's or an unrelated trainer's sessio
 test("D2b-2A / 2B / 2C: getAnalytics returns the real 0024 response through the Super Admin's session, and it passes the app's validator; batch / course / student rows keep its order", async () => {
   const today = await db.admin("select to_char((now() at time zone 'Asia/Kolkata')::date, 'YYYY-MM-DD')");
   const currentRankings = {};
+  const progressByPeriod = {};
   for (const key of periods.PERIOD_KEYS) {
     const range = periods.periodRange(key, today);
     const json = await repoAs(ids.A).getAnalytics(range.from, range.to, analytics.ANALYTICS_LIST_LIMIT);
@@ -211,7 +212,21 @@ test("D2b-2A / 2B / 2C: getAnalytics returns the real 0024 response through the 
     for (const r of st.rows) assert.equal(r.trendDirection, analytics.trendDirection(r.trend));
     assert.deepEqual(raw.students.current_window, { from: periods.addDays(today, -365), to: today }, `${key}: the trailing 366-day window`);
     currentRankings[key] = raw.students.current.map((r) => [r.rank, r.id, r.average, r.results]);
+    // D2b-2D: Course Progress — the real delivery / enrolment lists parse, join by course id and keep every course
+    const pr = panels.progress;
+    const courseIds = [...raw.delivery.map((d) => d.course_id), ...raw.enrolment.map((e) => e.course_id).filter((id) => !raw.delivery.some((d) => d.course_id === id))];
+    assert.deepEqual(pr.rows.map((r) => r.courseId), courseIds, `${key}: delivery order, then enrolment-only courses; none dropped`);
+    for (const r of pr.rows) {
+      const d = raw.delivery.find((x) => x.course_id === r.courseId);
+      const e = raw.enrolment.find((x) => x.course_id === r.courseId);
+      assert.deepEqual(r.delivery && [r.delivery.planned, r.delivery.delivered, r.delivery.overdue, r.delivery.percent], d ? [d.planned, d.delivered, d.overdue, analytics.progressPercent(d.delivered, d.planned)] : null);
+      assert.deepEqual(r.enrolment && [r.enrolment.completed, r.enrolment.active, r.enrolment.percent], e ? [e.completed, e.active, analytics.progressPercent(e.completed, e.active)] : null);
+    }
+    assert.deepEqual([pr.deliveryTotal, pr.enrolmentTotal], [raw.delivery_total, raw.enrolment_total]);
+    progressByPeriod[key] = pr;
   }
+  // Course Progress is current state: identical for every dashboard period.
+  for (const key of periods.PERIOD_KEYS) assert.deepEqual(progressByPeriod[key], progressByPeriod.this_month, `${key}: same Course Progress as this_month`);
   // The current ranking is the same for every dashboard period (only the trend follows the period).
   for (const key of periods.PERIOD_KEYS) assert.deepEqual(currentRankings[key], currentRankings.this_month, `${key}: same current ranking as this_month`);
 });

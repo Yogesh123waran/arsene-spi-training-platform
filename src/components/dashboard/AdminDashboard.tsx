@@ -38,6 +38,8 @@ import {
   type FigureChange,
   type RateComparison,
   type StudentPerformanceRow,
+  type CourseProgressRow,
+  ATTENDANCE_DEFINITION_NOTE,
 } from "@/lib/dashboard/analytics";
 
 /**
@@ -509,6 +511,77 @@ async function WeakTopicsPanel({ analytics }: { analytics: Promise<DashboardAnal
   );
 }
 
+// ---------------------------------------------------------------- course progress (D2b-2D: current state, streamed with the analytics)
+
+/** "—" with a spoken equivalent. */
+function NotAvailable() {
+  return (
+    <span>
+      —<span className="sr-only"> not available</span>
+    </span>
+  );
+}
+
+/** One course: delivery progress (primary, with the counts behind it), overdue classes, enrolment completion (secondary). */
+function CourseProgressItem({ row }: { row: CourseProgressRow }) {
+  const d = row.delivery;
+  const e = row.enrolment;
+  return (
+    <li className="py-3 first:pt-0 last:pb-0">
+      <div className="flex items-start justify-between gap-3">
+        <h3 className="min-w-0 break-words text-sm font-medium text-ink">{row.course}</h3>
+        <span className="shrink-0 font-mono text-sm font-semibold text-ink">
+          <span className="sr-only">Delivery progress: </span>
+          {d ? d.percentDisplay : <NotAvailable />}
+        </span>
+      </div>
+      {d && d.percent !== null && (
+        <div className="mt-1 h-1.5 w-full overflow-hidden rounded-sm bg-surface-sunken" aria-hidden="true">
+          <div className="h-full bg-primary-500" style={{ width: `${Math.max(0, Math.min(100, d.percent))}%` }} />
+        </div>
+      )}
+      <dl className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-0.5 text-2xs sm:grid-cols-3">
+        <div className="min-w-0">
+          <dt className="inline text-ink-muted">Delivered: </dt>
+          <dd className="inline text-ink">{d ? `${d.delivered} / ${d.planned} classes` : <NotAvailable />}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="inline text-ink-muted">Overdue: </dt>
+          <dd className={d && d.overdue > 0 ? "inline font-semibold text-ink" : "inline text-ink"}>{d ? d.overdue : <NotAvailable />}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="inline text-ink-muted">Enrolment completion: </dt>
+          <dd className="inline text-ink">{e ? `${e.completed} / ${e.active} · ${e.percentDisplay}` : <NotAvailable />}</dd>
+        </div>
+      </dl>
+    </li>
+  );
+}
+
+async function CourseProgressPanel({ analytics }: { analytics: Promise<DashboardAnalyticsResult> }) {
+  const { panels } = await analytics;
+  return (
+    <Panel id="dash-progress" title="Course Progress" description="Current delivery and enrolment progress" action={{ href: "/admin/courses", label: "View all courses" }}>
+      {panels.status === "error" ? (
+        <AnalyticsUnavailable />
+      ) : panels.data.progress.empty ? (
+        <Compact title="No course progress yet" description="No upcoming or ongoing batch has planned classes, and no batch has enrolments." />
+      ) : (
+        <>
+          <ul className="divide-y divide-surface-border">
+            {panels.data.progress.rows.map((r) => (
+              <CourseProgressItem key={r.courseId} row={r} />
+            ))}
+          </ul>
+          {panels.data.progress.deliveryShownText && <p className="mt-3 text-2xs text-ink-faint">{panels.data.progress.deliveryShownText}</p>}
+          {panels.data.progress.enrolmentShownText && <p className="mt-1 text-2xs text-ink-faint">{panels.data.progress.enrolmentShownText}</p>}
+          <p className="mt-2 text-2xs text-ink-faint">Current state — not affected by the reporting period. Delivery: upcoming and ongoing batches.</p>
+        </>
+      )}
+    </Panel>
+  );
+}
+
 // ---------------------------------------------------------------- student performance (D2b-2C: current ranking from 0027, streamed)
 
 /** Arrow per trend direction — always paired with a text label and the pp value (never colour alone). */
@@ -902,6 +975,9 @@ export function AdminDashboard({ data, analytics }: { data: AdminDashboardData; 
           <TrainingHealthPanel analytics={analytics} />
         </Suspense>
       </div>
+      <p role="note" className="-mt-3 text-2xs text-ink-faint">
+        {ATTENDANCE_DEFINITION_NOTE}
+      </p>
       <div className="grid grid-cols-1 gap-4">
         <Suspense key={`batches-${data.period.key}`} fallback={<PanelLoading id="dash-batches" title="Batch comparison" />}>
           <BatchComparisonPanel analytics={analytics} />
@@ -915,6 +991,9 @@ export function AdminDashboard({ data, analytics }: { data: AdminDashboardData; 
       </Suspense>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <Overview section={data.overview} />
+        <Suspense key={`progress-${data.period.key}`} fallback={<PanelLoading id="dash-progress" title="Course Progress" />}>
+          <CourseProgressPanel analytics={analytics} />
+        </Suspense>
         <Suspense key={`topics-${data.period.key}`} fallback={<PanelLoading id="dash-topics" title="Weak Topics" />}>
           <WeakTopicsPanel analytics={analytics} />
         </Suspense>
