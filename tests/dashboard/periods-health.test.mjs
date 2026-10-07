@@ -51,6 +51,36 @@ test("periods and their comparison period: the same number of India days immedia
   assert.equal(p.isPeriodKey("all_time"), false);
 });
 
+test("last 12 months: 1st of the month eleven months back → today; never more than 366 days (dashboard_analytics cap since 0026)", () => {
+  assert.deepEqual(p.PERIOD_KEYS, ["this_month", "previous_month", "last_3_months", "last_6_months", "last_12_months"], "the four existing periods unchanged, the new one last");
+  assert.equal(p.PERIOD_LABEL.last_12_months, "Last 12 months");
+  assert.equal(p.isPeriodKey("last_12_months"), true);
+  assert.equal(p.isPeriodKey("last_12_month"), false);
+  const r = p.periodRange("last_12_months", "2026-10-06");
+  assert.deepEqual(r, { from: "2025-11-01", to: "2026-10-06" });
+  assert.deepEqual(p.previousComparable(r), { from: "2024-11-26", to: "2025-10-31" }, "the same 340 days immediately before");
+  assert.deepEqual(p.periodRange("last_12_months", "2024-12-31"), { from: "2024-01-01", to: "2024-12-31" }, "a whole leap year: 366 days");
+  assert.equal(p.daysInclusive("2024-01-01", "2024-12-31"), 366);
+  assert.deepEqual(p.periodRange("last_12_months", "2028-02-29"), { from: "2027-03-01", to: "2028-02-29" }, "ending on a leap day: 366 days");
+  assert.deepEqual(p.periodRange("last_12_months", "2026-01-15"), { from: "2025-02-01", to: "2026-01-15" }, "year rollover");
+  // Every India date from 2023 to 2030: within the cap, ends today, starts on a 1st, and the comparison is adjacent.
+  let min = Infinity;
+  let max = 0;
+  for (let d = "2023-01-01"; d <= "2030-12-31"; d = p.addDays(d, 1)) {
+    const x = p.periodRange("last_12_months", d);
+    const days = p.daysInclusive(x.from, x.to);
+    min = Math.min(min, days);
+    max = Math.max(max, days);
+    assert.ok(days <= 366, `${d}: ${days} days`);
+    assert.equal(x.to, d);
+    assert.ok(x.from.endsWith("-01"), `${d}: starts on the 1st`);
+    const prev = p.previousComparable(x);
+    assert.equal(p.addDays(prev.to, 1), x.from, `${d}: comparison adjacent`);
+    assert.equal(p.daysInclusive(prev.from, prev.to), days);
+  }
+  assert.deepEqual([min, max], [335, 366], "shortest on the 1st of a month after a short year; 366 only for a full leap year");
+});
+
 test("comparisons: difference always; a percentage only against a non-zero previous value; never negative counts", () => {
   assert.deepEqual(p.compare(5, 3, "vs x"), { current: 5, previous: 3, difference: 2, percent: 66.7, direction: "up", label: "vs x" });
   assert.deepEqual(p.compare(2, 4, "vs x"), { current: 2, previous: 4, difference: -2, percent: -50, direction: "down", label: "vs x" });

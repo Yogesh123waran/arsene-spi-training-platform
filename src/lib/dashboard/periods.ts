@@ -64,7 +64,7 @@ export function indiaDayStart(date: string): string {
   return new Date(`${date}T00:00:00+05:30`).toISOString();
 }
 
-export const PERIOD_KEYS = ["this_month", "previous_month", "last_3_months", "last_6_months"] as const;
+export const PERIOD_KEYS = ["this_month", "previous_month", "last_3_months", "last_6_months", "last_12_months"] as const;
 export type PeriodKey = (typeof PERIOD_KEYS)[number];
 
 export const PERIOD_LABEL: Record<PeriodKey, string> = {
@@ -72,6 +72,7 @@ export const PERIOD_LABEL: Record<PeriodKey, string> = {
   previous_month: "Previous month",
   last_3_months: "Last 3 months",
   last_6_months: "Last 6 months",
+  last_12_months: "Last 12 months",
 };
 
 export function isPeriodKey(value: unknown): value is PeriodKey {
@@ -91,6 +92,8 @@ export interface DateRange {
  *   previous_month  the whole previous calendar month
  *   last_3_months   1st of the month two months back → today (this month + the 2 before)
  *   last_6_months   1st of the month five months back → today
+ *   last_12_months  1st of the month eleven months back → today (at most 366 days:
+ *                   dashboard_analytics accepts up to 366 since 0026)
  */
 export function periodRange(key: PeriodKey, today: string): DateRange {
   switch (key) {
@@ -104,6 +107,8 @@ export function periodRange(key: PeriodKey, today: string): DateRange {
       return { from: monthStart(today, -2), to: today };
     case "last_6_months":
       return { from: monthStart(today, -5), to: today };
+    case "last_12_months":
+      return { from: monthStart(today, -11), to: today };
   }
 }
 
