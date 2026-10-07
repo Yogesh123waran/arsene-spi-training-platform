@@ -6,6 +6,7 @@
 // are period-based from dashboard_analytics (streamed in their own Suspense boundaries), and Training
 // health shows six lines with an overall worst-line status. D2b-2B adds the batch and course comparison panels
 // (same single response, name order, no status bands, links to the existing batch / course / performance pages).
+// D2b-2C adds the Student Performance (Top 5) panel: the current ranking (0027 students.current) with the period's trend.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -88,7 +89,7 @@ test("accessibility: one h1 (PageHeader), each section an h2 inside a labelled r
   assert.match(view, /<section aria-labelledby=\{id\}/);
   assert.match(view, /<h2 id=\{id\} className=/);
   for (const id of ["dash-metrics", "dash-attention"]) assert.match(view, new RegExp(`<h2 id="${id}"`), id);
-  for (const id of ["dash-today", "dash-upcoming-classes", "dash-tests", "dash-overview", "dash-performance", "dash-health", "dash-topics", "dash-batches", "dash-courses", "dash-activity", "dash-actions", "dash-approvals"]) {
+  for (const id of ["dash-today", "dash-upcoming-classes", "dash-tests", "dash-overview", "dash-performance", "dash-health", "dash-topics", "dash-batches", "dash-courses", "dash-students", "dash-activity", "dash-actions", "dash-approvals"]) {
     assert.match(view, new RegExp(`id="${id}"`), id);
   }
   assert.match(view, /<figure aria-labelledby="dash-trend-caption">/);
@@ -147,12 +148,12 @@ test("training health: six lines, each with its reason; overall worst line wins 
   assert.match(view, /Based on \{health\.data\.overall\.basedOn\} of \{health\.data\.overall\.total\} indicators/);
   assert.match(view, /no_data: "neutral", unavailable: "neutral"/, "No data / Unavailable are neutral, not failures");
   assert.doesNotMatch(view, /health score|score\}|\/100/i, "no numeric score");
-  assert.doesNotMatch(view, /top 5|top performers|ranking|course-wise|batch-wise/i, "no rankings; D2b-2C not built yet");
+  assert.doesNotMatch(view, /top performers|ranking|course-wise|batch-wise/i, "no 'top performers' / ranking wording in the view (Student Performance (Top 5) is the approved D2b-2C title)");
 });
 
 test("streaming and isolation: each analytics panel has its own Suspense boundary and a fixed unavailable state; current-state sections render without them", () => {
   const view = strip(src(VIEW));
-  for (const [panel, key] of [["PerformancePanel", "performance"], ["TrainingHealthPanel", "health"], ["WeakTopicsPanel", "topics"], ["BatchComparisonPanel", "batches"], ["CourseComparisonPanel", "courses"]]) {
+  for (const [panel, key] of [["PerformancePanel", "performance"], ["TrainingHealthPanel", "health"], ["WeakTopicsPanel", "topics"], ["BatchComparisonPanel", "batches"], ["CourseComparisonPanel", "courses"], ["StudentPerformancePanel", "students"]]) {
     assert.match(view, new RegExp(`<Suspense key=\\{\`${key}-\\$\\{data\\.period\\.key\\}\`\\} fallback=\\{<PanelLoading `), `${panel}: own fallback, re-shown when the period changes`);
     assert.match(view, new RegExp(`async function ${panel}\\(`), `${panel} awaits the analytics promise itself`);
   }
@@ -169,7 +170,7 @@ test("sections: empty and error states; attention hidden when nothing needs atte
   for (const t of ["No classes today", "No upcoming classes", "No upcoming tests", "No recent activity"]) assert.ok(view.includes(t), t);
   assert.match(view, /grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6/, "2 / 3 / 4 / 6 metrics per row");
   assert.match(view, /grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3/, "1 / 2 / 3 content columns");
-  const order = ["<Metrics", "<Attention", "<PerformancePanel", "<TrainingHealthPanel", "<BatchComparisonPanel", "<CourseComparisonPanel", "<Overview", "<WeakTopicsPanel", "<TodayClasses", "<UpcomingClasses", "<UpcomingTests", "<Activity", "<QuickActions", "<PendingApprovalsPanel"];
+  const order = ["<Metrics", "<Attention", "<PerformancePanel", "<TrainingHealthPanel", "<BatchComparisonPanel", "<CourseComparisonPanel", "<StudentPerformancePanel", "<Overview", "<WeakTopicsPanel", "<TodayClasses", "<UpcomingClasses", "<UpcomingTests", "<Activity", "<QuickActions", "<PendingApprovalsPanel"];
   const positions = order.map((s) => view.lastIndexOf(s));
   assert.ok(positions.every((p) => p >= 0));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions, "attention right after the metrics; reading order matches the layout");
@@ -281,6 +282,50 @@ test("batch and course comparison (D2b-2B): from the one analytics response, nam
   assert.match(view, /if \(change\.comparison\.state !== "change"\) return <span className="text-ink-faint">No comparison data<\/span>;/);
   assert.match(lib, /shownText: total > rows\.length \? `Showing \$\{rows\.length\} of \$\{total\}` : null/);
   assert.doesNotMatch(lib.slice(lib.indexOf("export function batchComparison"), lib.indexOf("const hasAny")), /\.sort\(/, "no ranking in the read model");
-  // D2b-2C / 2D not built
-  assert.doesNotMatch(view, /datasets\.|students\.top|\.improving|\.declining|\.delivery|\.enrolment/, "student / progress panels are not part of D2b-2B");
+  // D2b-2D not built (student results are D2b-2C, tested below)
+  assert.doesNotMatch(view, /datasets\.|\.delivery|\.enrolment/, "progress panels are not part of D2b-2B / 2C");
+});
+
+test("Student Performance (Top 5) (D2b-2C): students.current (0027) in database order — #, name, Test Avg, trend arrow with its pp value and a text label; one analytics response", () => {
+  const view = strip(src(VIEW));
+  const lib = strip(src(ANALYTICS));
+  const panel = view.slice(view.indexOf("const TREND_ARROW ="), view.indexOf("function ChangeText("));
+  assert.ok(panel.includes("async function StudentPerformancePanel("), "the panel is inside the D2b-2C section");
+  assert.match(panel, /title="Student Performance \(Top 5\)" description="By average score" action=\{\{ href: "\/admin\/performance", label: "View detailed performance" \}\}/, "exact title, subtitle and the existing Performance page link");
+  assert.match(panel, /const \{ panels \} = await analytics;/, "the shared analytics promise — no further call");
+  assert.match(panel, /panels\.status === "error" \? \(\s*<AnalyticsUnavailable \/>/, "the existing unavailable state");
+  assert.match(view, /<Suspense key=\{`students-\$\{data\.period\.key\}`\} fallback=\{<PanelLoading id="dash-students" title="Student Performance \(Top 5\)" \/>\}>\s*<StudentPerformancePanel analytics=\{analytics\} \/>/, "keyed Suspense, same place");
+  // exactly four columns, in order
+  const heads = [...panel.matchAll(/<th scope="col" className=\{.*?\}>([^<]+)<\/th>/g)].map((m) => m[1]);
+  assert.deepEqual(heads, ["#", "Student Name", "Test Avg", "Trend"]);
+  assert.equal((panel.match(/<col\b/g) ?? []).length, 4);
+  assert.match(panel, /<caption className="sr-only">Student Performance \(Top 5\), by average score<\/caption>/);
+  // rows: database order and rank, name with the code beneath, one-decimal average, trend cell
+  assert.match(panel, /\{panels\.data\.students\.rows\.map\(\(s\) =>/);
+  assert.match(panel, /font-semibold text-ink">\{s\.rank\}<\/span>/, "the database rank number");
+  assert.match(panel, /<span className="block break-words font-medium text-ink">\{s\.name\}<\/span>\s*\{s\.code && <span className="block break-all font-mono text-2xs text-ink-faint">\{s\.code\}<\/span>\}/);
+  assert.match(panel, /\{s\.averageDisplay\}<\/td>/);
+  assert.match(panel, /<TrendCell row=\{s\} \/>/);
+  // trend: arrow (decorative) + text label (screen readers) + the pp value — never colour alone; null → "No comparison"
+  assert.match(panel, /const TREND_ARROW = \{ up: "↑", down: "↓", neutral: "→", none: "" \} as const;/);
+  assert.match(panel, /<span aria-hidden="true">\{TREND_ARROW\[row\.trendDirection\]\}<\/span>\s*<span className="sr-only">\{row\.directionLabel\}:<\/span>\s*<span>\{row\.trendDisplay\}<\/span>/);
+  assert.match(panel, /if \(row\.trendDirection === "none"\) return <span className="text-xs text-ink-faint">\{row\.trendDisplay\}<\/span>;/);
+  assert.match(lib, /trendDisplay: s\.trend === null \? "No comparison" : formatTrendPoints\(s\.trend\)/);
+  assert.match(lib, /if \(points >= TREND_THRESHOLD_PP\) return "up";\s*if \(points <= -TREND_THRESHOLD_PP\) return "down";\s*return "neutral";/, "±1 pp thresholds, inclusive");
+  assert.match(lib, /up: "Up", down: "Down", neutral: "No meaningful change", none: "No comparison"/);
+  // empty state and caption
+  assert.match(panel, /panels\.data\.students\.insufficient \? \(\s*<Compact title="Insufficient data" description="No student has 3 or more released results in the last 366 days" \/>/);
+  assert.match(panel, /<p className="mt-3 text-2xs text-ink-faint">\{panels\.data\.students\.caption\}<\/p>/);
+  assert.match(lib, /caption: `Current ranking: last 366 days · trend: \$\{periodLabel\} vs previous`/);
+  // the current ranking comes from students.current only — never substituted from the period-based lists
+  assert.match(lib, /students: studentPerformance\(raw\.students\.current, raw\.students\.current_window, PERIOD_LABEL\[key\]\)/);
+  assert.doesNotMatch(lib.slice(lib.indexOf("export function studentPerformance"), lib.indexOf("const hasAny")), /\.sort\(|\.reverse\(|students\.(top|improving|declining)/, "never re-ranked or substituted");
+  // wording: none of the retired / banned labels; no per-student links
+  assert.doesNotMatch(view, /Student results|Highest test averages|"Improving"|"Declining"|Top performers|View all students/i);
+  assert.doesNotMatch(panel, /<Link|href=\{|\?student=|\/admin\/users|\/admin\/students/, "no per-student URL");
+  assert.doesNotMatch(panel, /at-risk|at risk|follow-up|intervention|Badge|HEALTH_LABEL/i);
+  // responsive (~400 px): a fixed-layout table that fits — wrapping names, narrow fixed columns, no horizontal overflow
+  assert.match(panel, /<table className="w-full table-fixed border-collapse text-sm">/);
+  assert.match(panel, /<col className="w-9" \/>\s*<col \/>\s*<col className="w-20" \/>\s*<col className="w-28" \/>/, "≈ 228 px of fixed columns; the name column takes the rest");
+  assert.doesNotMatch(panel, /overflow-x|min-w-\[|w-\[|whitespace-nowrap|truncate|<Table\b/, "no wide, clipped or scrolling layout");
 });

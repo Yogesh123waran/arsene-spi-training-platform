@@ -520,4 +520,33 @@ test("analytics read model through the service: totals, trend, topics and health
     ["Batch One", "/admin/batches/b1", "/admin/performance?batch=b1", "+13.8 pp", "No comparison data"],
   ]);
   assert.deepEqual(p.courses.rows.map((c) => [c.title, c.href, c.testAvgChange.display]), [["Valves", "/admin/courses/c1", "+14.6 pp"]]);
+  // D2b-2C: Student Performance from the same single response (students.current, 0027; no further calls)
+  assert.deepEqual(p.students.rows.map((s) => [s.rank, s.id, s.averageDisplay, s.trendDisplay, s.trendDirection]), [
+    [1, "s2", "96.0%", "+8 pp", "up"],
+    [2, "s1", "92.3%", "−1 pp", "down"],
+    [3, "s3", "88.0%", "No comparison", "none"],
+  ]);
+  assert.equal(p.students.caption, "Current ranking: last 366 days · trend: This month vs previous");
+});
+
+test("Student Performance through the service: the period changes only the trend; the current ranking stays the same (one call per load)", async () => {
+  // The database answers per period: the same current ranking, a different trend (as 0027 does).
+  const byPeriod = (from) => {
+    const r = rawAnalytics();
+    const trends = { "2026-10-01": [8, -1, null], "2025-11-01": [0.5, -0.99, 3] }[from];
+    r.students.current = r.students.current.map((s, i) => ({ ...s, trend: trends[i] }));
+    return r;
+  };
+  const load = async (period) => {
+    const { repo, calls } = fakeRepo({ getAnalytics: async (from, to, limit) => { calls.push(["getAnalytics", from, to, limit]); return byPeriod(from); } });
+    const a = await (await service({ repo }).load(period)).analytics;
+    assert.equal(calls.filter((c) => c[0] === "getAnalytics").length, 1, `${period}: one analytics call`);
+    return a.panels.data.students;
+  };
+  const month = await load("this_month");
+  const year = await load("last_12_months");
+  assert.deepEqual(month.rows.map((s) => [s.rank, s.id, s.averageDisplay]), year.rows.map((s) => [s.rank, s.id, s.averageDisplay]), "same current ranking for both periods");
+  assert.deepEqual(month.rows.map((s) => [s.trendDisplay, s.trendDirection]), [["+8 pp", "up"], ["−1 pp", "down"], ["No comparison", "none"]]);
+  assert.deepEqual(year.rows.map((s) => [s.trendDisplay, s.trendDirection]), [["+0.5 pp", "neutral"], ["−0.99 pp", "neutral"], ["+3 pp", "up"]]);
+  assert.equal(year.caption, "Current ranking: last 366 days · trend: Last 12 months vs previous");
 });

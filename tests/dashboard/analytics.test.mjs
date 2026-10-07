@@ -266,3 +266,87 @@ test("comparison: name / title order preserved exactly as returned (never re-ran
   const empty = a.buildAnalyticsPanels(a.parseAnalytics(rawAnalytics({ batches: [], batches_total: 0, courses: [], courses_total: 0 })), "this_month");
   assert.deepEqual([empty.batches.rows.length, empty.courses.rows.length], [0, 0]);
 });
+
+// ---------------------------------------------------------------- D2b-2C: Student Performance (Top 5) — students.current (0027)
+
+const cur = (rank, o = {}) => ({
+  rank, id: `c${rank}`, code: `C-${rank}`, name: `Current ${rank}`, average: 100 - rank, results: 3 + rank,
+  period_average: 90, period_results: 2, previous_average: 88, previous_results: 1, trend: 2, ...o,
+});
+const withCurrent = (current, current_window = { from: "2025-10-06", to: "2026-10-06" }) => {
+  const r = rawAnalytics();
+  r.students = { ...r.students, current, current_window };
+  return r;
+};
+
+test("student performance parser: students.current and current_window read with the strict 0027 contract; malformed data rejected (never cast or substituted)", () => {
+  const raw = a.parseAnalytics(rawAnalytics());
+  assert.deepEqual(raw.students.current[0], { rank: 1, id: "s2", code: "S-2", name: "Student Two", average: 96, results: 4, period_average: 96, period_results: 2, previous_average: 88, previous_results: 1, trend: 8 });
+  assert.equal(raw.students.current[2].trend, null, "no comparison stays null");
+  assert.deepEqual(raw.students.current_window, { from: "2025-10-06", to: "2026-10-06" });
+  const bad = (mutate, path) => {
+    const r = rawAnalytics();
+    mutate(r);
+    assert.throws(() => a.parseAnalytics(r), (e) => e instanceof a.AnalyticsShapeError && e.path === path, path);
+  };
+  bad((r) => { delete r.students.current; }, "students.current");
+  bad((r) => { r.students.current = {}; }, "students.current");
+  bad((r) => { delete r.students.current_window; }, "students.current_window");
+  bad((r) => { r.students.current_window.to = "2026-02-30"; }, "students.current_window.to");
+  bad((r) => { r.students.current[0].rank = 2; }, "students.current[0].rank");                 // database order is 1, 2, 3 …
+  bad((r) => { [r.students.current[0], r.students.current[1]] = [r.students.current[1], r.students.current[0]]; }, "students.current[0].rank");
+  bad((r) => { r.students.current[1].average = "92"; }, "students.current[1].average");
+  bad((r) => { r.students.current[1].results = 2.5; }, "students.current[1].results");
+  bad((r) => { r.students.current[0].trend = "8"; }, "students.current[0].trend");
+  bad((r) => { delete r.students.current[0].previous_results; }, "students.current[0].previous_results");
+  bad((r) => { r.students.current[0].id = 7; }, "students.current[0].id");
+  bad((r) => { r.students.current = [1, 2, 3, 4, 5, 6].map((n) => cur(n)); }, "students.current");     // at most 5
+});
+
+test("student performance read model: database rank order kept (never re-ranked), at most 5, Test Avg with one decimal", () => {
+  const p = a.buildAnalyticsPanels(a.parseAnalytics(rawAnalytics()), "this_month").students;
+  assert.deepEqual(p.rows.map((r) => [r.rank, r.name, r.code, r.averageDisplay, r.results]), [
+    [1, "Student Two", "S-2", "96.0%", 4],
+    [2, "Student One", "S-1", "92.3%", 5],   // 92.25 → 92.3 (half away from zero)
+    [3, "Student Three", "S-3", "88.0%", 3],
+  ]);
+  // Ranked by the database even when the averages would sort differently (the application never re-ranks).
+  const odd = a.buildAnalyticsPanels(a.parseAnalytics(withCurrent([cur(1, { average: 70 }), cur(2, { average: 95 }), cur(3, { average: 80 })])), "this_month").students;
+  assert.deepEqual(odd.rows.map((r) => [r.rank, r.id]), [[1, "c1"], [2, "c2"], [3, "c3"]]);
+  const five = a.buildAnalyticsPanels(a.parseAnalytics(withCurrent([1, 2, 3, 4, 5].map((n) => cur(n)))), "this_month").students;
+  assert.equal(five.rows.length, 5);
+  assert.equal(a.STUDENT_PERFORMANCE_LIMIT, 5);
+  assert.deepEqual(["96.0%", "99.9%", "100.0%", "0.0%", "66.7%"], [96, 99.94, 100, 0, 66.65].map(a.formatAverage));
+  assert.deepEqual(p.window, { from: "2025-10-06", to: "2026-10-06" });
+  assert.equal(p.caption, "Current ranking: last 366 days · trend: This month vs previous");
+  assert.equal(a.buildAnalyticsPanels(a.parseAnalytics(rawAnalytics()), "last_12_months").students.caption, "Current ranking: last 366 days · trend: Last 12 months vs previous");
+  for (const r of p.rows) assert.ok(!("band" in r) && !("status" in r) && !("href" in r), "no status band or per-student link");
+});
+
+test("student performance trend: the database pp value exactly; ≥ +1 up, ≤ −1 down, in between neutral; null → 'No comparison'", () => {
+  assert.equal(a.TREND_THRESHOLD_PP, 1);
+  const cases = [
+    [8, "up", "+8 pp", "Up"],
+    [1, "up", "+1 pp", "Up"],                       // exactly +1 → up
+    [0.99, "neutral", "+0.99 pp", "No meaningful change"],
+    [0.5, "neutral", "+0.5 pp", "No meaningful change"],
+    [0, "neutral", "0 pp", "No meaningful change"],
+    [-0.99, "neutral", "−0.99 pp", "No meaningful change"],
+    [-1, "down", "−1 pp", "Down"],                  // exactly −1 → down
+    [-12.25, "down", "−12.25 pp", "Down"],
+    [null, "none", "No comparison", "No comparison"],
+  ];
+  const rows = a.buildAnalyticsPanels(a.parseAnalytics(withCurrent(cases.map(([t], i) => cur(i + 1, { trend: t })).slice(0, 5))), "this_month").students.rows;
+  const rows2 = a.buildAnalyticsPanels(a.parseAnalytics(withCurrent(cases.map(([t], i) => cur(i + 1, { trend: t })).slice(5).map((c, i) => ({ ...c, rank: i + 1 })))), "this_month").students.rows;
+  assert.deepEqual([...rows, ...rows2].map((r) => [r.trend, r.trendDirection, r.trendDisplay, r.directionLabel]), cases);
+  for (const [t, dir] of cases) assert.equal(a.trendDirection(t), dir, String(t));
+  assert.equal(a.formatTrendPoints(-3.2), "−3.2 pp", "a real minus sign; the value as returned (no re-rounding)");
+});
+
+test("student performance: no student with 3 or more released results → the insufficient-data state, never invented rows", () => {
+  const p = a.buildAnalyticsPanels(a.parseAnalytics(withCurrent([])), "last_3_months").students;
+  assert.equal(p.insufficient, true);
+  assert.deepEqual(p.rows, []);
+  assert.equal(p.caption, "Current ranking: last 366 days · trend: Last 3 months vs previous");
+  assert.equal(a.buildAnalyticsPanels(a.parseAnalytics(rawAnalytics()), "this_month").students.insufficient, false);
+});

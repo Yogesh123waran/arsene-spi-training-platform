@@ -26,6 +26,13 @@ export function rawAnalytics(overrides = {}) {
       improving: [{ id: "s1", code: "S-1", name: "Student One", earlier_avg: 52.5, later_avg: 75, change: 22.5, results: 5 }],
       declining: [{ id: "s2", code: "S-2", name: "Student Two", earlier_avg: 87.5, later_avg: 75, change: -12.5, results: 4 }],
       ranked: 5,
+      // 0027: the CURRENT ranking (trailing 366 days, database order) with each student's period trend (pp)
+      current: [
+        { rank: 1, id: "s2", code: "S-2", name: "Student Two", average: 96, results: 4, period_average: 96, period_results: 2, previous_average: 88, previous_results: 1, trend: 8 },
+        { rank: 2, id: "s1", code: "S-1", name: "Student One", average: 92.25, results: 5, period_average: 90, period_results: 1, previous_average: 91, previous_results: 2, trend: -1 },
+        { rank: 3, id: "s3", code: "S-3", name: "Student Three", average: 88, results: 3, period_average: null, period_results: 0, previous_average: 80, previous_results: 2, trend: null },
+      ],
+      current_window: { from: "2025-10-06", to: "2026-10-06" },
     },
     topics: [
       { module_id: "m1", title: "Control Valve Sizing", percent: 33.33, answers: 6, band: "attention" },

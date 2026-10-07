@@ -167,8 +167,9 @@ test("D2a RLS: the same reads under a student's or an unrelated trainer's sessio
 
 // ---------------------------------------------------------------- D2b-2A: the real dashboard_analytics response through the repository
 
-test("D2b-2A / 2B: getAnalytics returns the real 0024 response through the Super Admin's session, and it passes the app's validator; batch / course rows keep its order", async () => {
+test("D2b-2A / 2B / 2C: getAnalytics returns the real 0024 response through the Super Admin's session, and it passes the app's validator; batch / course / student rows keep its order", async () => {
   const today = await db.admin("select to_char((now() at time zone 'Asia/Kolkata')::date, 'YYYY-MM-DD')");
+  const currentRankings = {};
   for (const key of periods.PERIOD_KEYS) {
     const range = periods.periodRange(key, today);
     const json = await repoAs(ids.A).getAnalytics(range.from, range.to, analytics.ANALYTICS_LIST_LIMIT);
@@ -200,7 +201,19 @@ test("D2b-2A / 2B: getAnalytics returns the real 0024 response through the Super
       assert.ok(b.testAvg.value !== null || b.testAvg.display === `Insufficient data (${b.testAvg.evidence})`);
     }
     for (const c of panels.courses.rows) assert.equal(c.href, `/admin/courses/${c.id}`);
+    // D2b-2C: Student Performance — the real 0027 students.current passes the parser; database order, at most 5, ≥ 3 results
+    const st = panels.students;
+    assert.ok(raw.students.current.length <= analytics.STUDENT_PERFORMANCE_LIMIT, `${key}: at most 5`);
+    assert.deepEqual(st.rows.map((r) => [r.rank, r.id]), raw.students.current.map((r, i) => [i + 1, r.id]), `${key}: the database's rank order`);
+    assert.ok(raw.students.current.every((r) => r.results >= 3), `${key}: 3 or more released results`);
+    assert.equal(st.insufficient, raw.students.current.length === 0);
+    assert.equal(st.caption, `Current ranking: last 366 days · trend: ${periods.PERIOD_LABEL[key]} vs previous`);
+    for (const r of st.rows) assert.equal(r.trendDirection, analytics.trendDirection(r.trend));
+    assert.deepEqual(raw.students.current_window, { from: periods.addDays(today, -365), to: today }, `${key}: the trailing 366-day window`);
+    currentRankings[key] = raw.students.current.map((r) => [r.rank, r.id, r.average, r.results]);
   }
+  // The current ranking is the same for every dashboard period (only the trend follows the period).
+  for (const key of periods.PERIOD_KEYS) assert.deepEqual(currentRankings[key], currentRankings.this_month, `${key}: same current ranking as this_month`);
 });
 
 test("D2b-2A: the database's refusals map to the repository's typed errors — trainer → permission, future end date → validation", async () => {

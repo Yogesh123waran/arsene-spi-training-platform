@@ -37,6 +37,7 @@ import {
   type EvidenceFigure,
   type FigureChange,
   type RateComparison,
+  type StudentPerformanceRow,
 } from "@/lib/dashboard/analytics";
 
 /**
@@ -508,6 +509,75 @@ async function WeakTopicsPanel({ analytics }: { analytics: Promise<DashboardAnal
   );
 }
 
+// ---------------------------------------------------------------- student performance (D2b-2C: current ranking from 0027, streamed)
+
+/** Arrow per trend direction — always paired with a text label and the pp value (never colour alone). */
+const TREND_ARROW = { up: "↑", down: "↓", neutral: "→", none: "" } as const;
+const TREND_TONE = { up: "text-signal-green", down: "text-signal-red", neutral: "text-ink-muted", none: "text-ink-faint" } as const;
+const SP_HEAD = "px-2 py-2 text-left text-2xs font-semibold uppercase tracking-wide text-ink-muted";
+
+function TrendCell({ row }: { row: StudentPerformanceRow }) {
+  if (row.trendDirection === "none") return <span className="text-xs text-ink-faint">{row.trendDisplay}</span>;
+  return (
+    <span className={`inline-flex items-center justify-end gap-1 font-mono text-xs ${TREND_TONE[row.trendDirection]}`}>
+      <span aria-hidden="true">{TREND_ARROW[row.trendDirection]}</span>
+      <span className="sr-only">{row.directionLabel}:</span>
+      <span>{row.trendDisplay}</span>
+    </span>
+  );
+}
+
+async function StudentPerformancePanel({ analytics }: { analytics: Promise<DashboardAnalyticsResult> }) {
+  const { panels } = await analytics;
+  return (
+    <Panel id="dash-students" title="Student Performance (Top 5)" description="By average score" action={{ href: "/admin/performance", label: "View detailed performance" }}>
+      {panels.status === "error" ? (
+        <AnalyticsUnavailable />
+      ) : panels.data.students.insufficient ? (
+        <Compact title="Insufficient data" description="No student has 3 or more released results in the last 366 days" />
+      ) : (
+        <>
+          <table className="w-full table-fixed border-collapse text-sm">
+            <caption className="sr-only">Student Performance (Top 5), by average score</caption>
+            <colgroup>
+              <col className="w-9" />
+              <col />
+              <col className="w-20" />
+              <col className="w-28" />
+            </colgroup>
+            <thead className="border-b border-surface-border bg-surface-sunken">
+              <tr>
+                <th scope="col" className={SP_HEAD}>#</th>
+                <th scope="col" className={SP_HEAD}>Student Name</th>
+                <th scope="col" className={`${SP_HEAD} text-right`}>Test Avg</th>
+                <th scope="col" className={`${SP_HEAD} text-right`}>Trend</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-border">
+              {panels.data.students.rows.map((s) => (
+                <tr key={s.id}>
+                  <td className="px-2 py-2 align-top">
+                    <span className="inline-flex h-5 w-5 items-center justify-center rounded-sm border border-surface-border bg-surface-sunken font-mono text-2xs font-semibold text-ink">{s.rank}</span>
+                  </td>
+                  <td className="min-w-0 px-2 py-2 align-top">
+                    <span className="block break-words font-medium text-ink">{s.name}</span>
+                    {s.code && <span className="block break-all font-mono text-2xs text-ink-faint">{s.code}</span>}
+                  </td>
+                  <td className="px-2 py-2 text-right align-top font-mono text-sm font-semibold text-ink">{s.averageDisplay}</td>
+                  <td className="px-2 py-2 text-right align-top">
+                    <TrendCell row={s} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-3 text-2xs text-ink-faint">{panels.data.students.caption}</p>
+        </>
+      )}
+    </Panel>
+  );
+}
+
 // ---------------------------------------------------------------- batch / course comparison (D2b-2B: period-based, streamed)
 
 /** pp change only where 0024 has a previous figure; otherwise "No comparison data" (never 0 pp). */
@@ -840,6 +910,9 @@ export function AdminDashboard({ data, analytics }: { data: AdminDashboardData; 
           <CourseComparisonPanel analytics={analytics} />
         </Suspense>
       </div>
+      <Suspense key={`students-${data.period.key}`} fallback={<PanelLoading id="dash-students" title="Student Performance (Top 5)" />}>
+        <StudentPerformancePanel analytics={analytics} />
+      </Suspense>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <Overview section={data.overview} />
         <Suspense key={`topics-${data.period.key}`} fallback={<PanelLoading id="dash-topics" title="Weak Topics" />}>

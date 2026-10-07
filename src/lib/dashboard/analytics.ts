@@ -1,10 +1,11 @@
 /**
- * Dashboard analytics (D2b-2A / 2B) — the read side of public.dashboard_analytics
+ * Dashboard analytics (D2b-2A / 2B / 2C) — the read side of public.dashboard_analytics
  * (migration 0024). Pure: no I/O, no server imports.
  *
  *   parseAnalytics()      runtime validation of the RPC's JSON (no blind casts)
  *   buildAnalyticsPanels() the period-based read models the page renders
  *   batch / course comparison (D2b-2B): name order as returned, evidence, pp change
+ *   student performance (D2b-2C): students.current (0027) in database rank order, trend arrows at ±1 pp
  *   comparison helpers    rates in percentage points; counts as % change
  *   health indicators     attendance / assessment / assignments / students
  *                         (Q2 thresholds) and the overall worst-line-wins
@@ -95,6 +96,22 @@ export interface RawTrendStudent {
   results: number;
 }
 
+/** 0027: one row of the CURRENT ranking (trailing 366 days, independent of the period) with its period trend. */
+export interface RawCurrentStudent {
+  rank: number;
+  id: string;
+  code: string;
+  name: string;
+  average: number;
+  results: number;
+  period_average: number | null;
+  period_results: number;
+  previous_average: number | null;
+  previous_results: number;
+  /** pp: period_average − previous_average; null without a comparison. */
+  trend: number | null;
+}
+
 export type TopicHealthBand = "healthy" | "watch" | "attention";
 
 export interface RawTopic {
@@ -140,7 +157,7 @@ export interface DashboardAnalyticsRaw {
   batches_total: number;
   courses: RawCourse[];
   courses_total: number;
-  students: { top: RawTopStudent[]; improving: RawTrendStudent[]; declining: RawTrendStudent[]; ranked: number };
+  students: { top: RawTopStudent[]; improving: RawTrendStudent[]; declining: RawTrendStudent[]; ranked: number; current: RawCurrentStudent[]; current_window: { from: string; to: string } };
   topics: RawTopic[];
   delivery: RawDelivery[];
   delivery_total: number;
@@ -201,6 +218,26 @@ function totals(v: unknown, path: string): RawTotals {
     attendance_marked: count(o.attendance_marked, `${path}.attendance_marked`),
     assignment_avg: numOrNull(o.assignment_avg, `${path}.assignment_avg`),
     assignments_scored: count(o.assignments_scored, `${path}.assignments_scored`),
+  };
+}
+
+function currentStudent(v: unknown, i: number): RawCurrentStudent {
+  const path = `students.current[${i}]`;
+  const o = obj(v, path);
+  const rank = count(o.rank, `${path}.rank`);
+  if (rank !== i + 1) throw new AnalyticsShapeError(`${path}.rank`); // ranked by the database: 1, 2, 3 … in order
+  return {
+    rank,
+    id: text(o.id, `${path}.id`),
+    code: text(o.code, `${path}.code`),
+    name: text(o.name, `${path}.name`),
+    average: num(o.average, `${path}.average`),
+    results: count(o.results, `${path}.results`),
+    period_average: numOrNull(o.period_average, `${path}.period_average`),
+    period_results: count(o.period_results, `${path}.period_results`),
+    previous_average: numOrNull(o.previous_average, `${path}.previous_average`),
+    previous_results: count(o.previous_results, `${path}.previous_results`),
+    trend: numOrNull(o.trend, `${path}.trend`),
   };
 }
 
@@ -298,6 +335,15 @@ export function parseAnalytics(json: unknown): DashboardAnalyticsRaw {
       improving: list(s.improving, "students.improving").map((v, i) => trendStudent(v, `students.improving[${i}]`)),
       declining: list(s.declining, "students.declining").map((v, i) => trendStudent(v, `students.declining[${i}]`)),
       ranked: count(s.ranked, "students.ranked"),
+      current: (() => {
+        const rows = list(s.current, "students.current");
+        if (rows.length > STUDENT_PERFORMANCE_LIMIT) throw new AnalyticsShapeError("students.current");
+        return rows.map((v, i) => currentStudent(v, i));
+      })(),
+      current_window: (() => {
+        const w = obj(s.current_window, "students.current_window");
+        return { from: date(w.from, "students.current_window.from"), to: date(w.to, "students.current_window.to") };
+      })(),
     },
     topics: list(root.topics, "topics").map((v, i) => {
       const o = obj(v, `topics[${i}]`);
@@ -597,7 +643,9 @@ export interface AnalyticsPanels {
   batches: ComparisonList<BatchComparisonRow>;
   /** D2b-2B: course comparison (title order, as returned — never re-ranked). */
   courses: ComparisonList<CourseComparisonRow>;
-  /** Kept for D2b-2C / 2D (student and progress panels); batch / course rows are rendered from `batches` / `courses`. */
+  /** D2b-2C: Student Performance (Top 5) — the current ranking (0027), database order, with the selected period's trend. */
+  students: StudentPerformance;
+  /** Kept for D2b-2D (progress panels); batch / course / student rows are rendered from `batches` / `courses` / `students`. */
   datasets: Pick<DashboardAnalyticsRaw, "batches" | "batches_total" | "courses" | "courses_total" | "students" | "delivery" | "delivery_total" | "enrolment" | "enrolment_total">;
 }
 
@@ -722,6 +770,89 @@ export function courseComparison(courses: RawCourse[], total: number): Compariso
   );
 }
 
+// -------------------------------------------------------------------
+// Student performance (D2b-2C) — students.current of 0027
+// -------------------------------------------------------------------
+
+/** Rows shown (0027 returns at most 5, already ranked). */
+export const STUDENT_PERFORMANCE_LIMIT = 5;
+/** Trend arrows: ≥ +1 pp up, ≤ −1 pp down, in between neutral (the database never hides small movements). */
+export const TREND_THRESHOLD_PP = 1;
+
+export type TrendDirection = "up" | "down" | "neutral" | "none";
+
+/** ≥ +1 → up; ≤ −1 → down; otherwise neutral; null (no comparison) → none. */
+export function trendDirection(points: number | null): TrendDirection {
+  if (points === null) return "none";
+  if (points >= TREND_THRESHOLD_PP) return "up";
+  if (points <= -TREND_THRESHOLD_PP) return "down";
+  return "neutral";
+}
+
+/** The database value as returned (up to 2 decimals), signed: "+8 pp", "−3.25 pp", "+0.99 pp", "0 pp". */
+export function formatTrendPoints(points: number): string {
+  if (points === 0) return "0 pp";
+  return `${points > 0 ? "+" : "−"}${Math.abs(points)} pp`;
+}
+
+/** One decimal, always shown: 96 → "96.0%". */
+export function formatAverage(v: number): string {
+  return `${round1(v).toFixed(1)}%`;
+}
+
+export interface StudentPerformanceRow {
+  rank: number;
+  id: string;
+  code: string;
+  name: string;
+  average: number;
+  /** "96.0%" */
+  averageDisplay: string;
+  /** Released results in the current window (≥ 3). */
+  results: number;
+  /** Selected period − comparison period, in pp; null without a comparison. */
+  trend: number | null;
+  trendDirection: TrendDirection;
+  /** "+8 pp" / "−1 pp" / "+0.99 pp" / "No comparison" */
+  trendDisplay: string;
+  /** Text equivalent of the arrow (never colour alone): "Up", "Down", "No meaningful change", "No comparison". */
+  directionLabel: string;
+}
+
+export interface StudentPerformance {
+  /** In the database's rank order (never re-ranked), at most 5. */
+  rows: StudentPerformanceRow[];
+  /** No student has 3 or more released results in the current window. */
+  insufficient: boolean;
+  /** The current window (India today − 365 → today). */
+  window: { from: string; to: string };
+  /** "Current ranking: last 366 days · trend: This month vs previous" */
+  caption: string;
+}
+
+const TREND_LABEL: Record<TrendDirection, string> = { up: "Up", down: "Down", neutral: "No meaningful change", none: "No comparison" };
+
+export function studentPerformance(current: RawCurrentStudent[], window: { from: string; to: string }, periodLabel: string): StudentPerformance {
+  const rows = current.slice(0, STUDENT_PERFORMANCE_LIMIT).map((s) => {
+    const direction = trendDirection(s.trend);
+    return {
+      rank: s.rank,
+      id: s.id,
+      code: s.code,
+      name: s.name,
+      average: s.average,
+      averageDisplay: formatAverage(s.average),
+      results: s.results,
+      trend: s.trend,
+      trendDirection: direction,
+      trendDisplay: s.trend === null ? "No comparison" : formatTrendPoints(s.trend),
+      directionLabel: TREND_LABEL[direction],
+    };
+  });
+  return { rows, insufficient: rows.length === 0, window, caption: `Current ranking: last 366 days · trend: ${periodLabel} vs previous` };
+}
+
+
 const hasAny = (t: RawTotals) => t.results + t.attendance_marked + t.assignments_scored > 0;
 
 export function buildAnalyticsPanels(raw: DashboardAnalyticsRaw, periodKey: string): AnalyticsPanels {
@@ -770,6 +901,7 @@ export function buildAnalyticsPanels(raw: DashboardAnalyticsRaw, periodKey: stri
     resultsInPeriod: cur.results,
     batches: batchComparison(raw.batches, raw.batches_total),
     courses: courseComparison(raw.courses, raw.courses_total),
+    students: studentPerformance(raw.students.current, raw.students.current_window, PERIOD_LABEL[key]),
     datasets: {
       batches: raw.batches,
       batches_total: raw.batches_total,
