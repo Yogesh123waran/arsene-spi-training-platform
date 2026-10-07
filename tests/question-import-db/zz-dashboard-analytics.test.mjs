@@ -192,20 +192,32 @@ test("security: SECURITY INVOKER, STABLE, empty search_path, exact EXECUTE grant
 
 // ---------------------------------------------------------------- validation and periods
 
-test("validation: dates required, start ≤ end, no future end (India today), at most 200 days, limit 1–50 (22023)", async () => {
+test("validation: dates required, start ≤ end, no future end (India today), at most 366 days (0026), limit 1–50 (22023)", async () => {
   const today = await db.admin("select to_char((now() at time zone 'Asia/Kolkata')::date, 'YYYY-MM-DD')");
   const tomorrow = await db.admin("select to_char((now() at time zone 'Asia/Kolkata')::date + 1, 'YYYY-MM-DD')");
   const bad = [
     { p_from: null, p_to: "2024-03-31" }, { p_from: "2024-03-01", p_to: null },
     { p_from: "2024-03-02", p_to: "2024-03-01" },
     { p_from: today, p_to: tomorrow },
-    { p_from: "2024-01-01", p_to: "2024-07-19" }, // 201 days
+    { p_from: "2024-01-01", p_to: "2025-01-01" }, // 367 days
+    { p_from: "2023-03-01", p_to: "2024-03-01" }, // 367 days across a leap day
     { ...MARCH, p_limit: 0 }, { ...MARCH, p_limit: 51 }, { ...MARCH, p_limit: null },
   ];
   for (const args of bad) assert.equal((await call(ids.A, args)).error?.code, "22023", JSON.stringify(args));
-  for (const args of [{ p_from: today, p_to: today }, { p_from: "2024-01-01", p_to: "2024-07-18" }, { ...MARCH, p_limit: 1 }, { ...MARCH, p_limit: 50 }]) {
+  const tooLong = (await call(ids.A, { p_from: "2024-01-01", p_to: "2025-01-01" })).error;
+  assert.match(tooLong?.message ?? "", /^The period can be at most 366 days\.$/, "the 0026 cap and its message");
+  for (const args of [
+    { p_from: today, p_to: today },
+    { p_from: "2024-01-01", p_to: "2024-12-31" }, // 366 days (leap year) — the maximum
+    { p_from: "2023-03-01", p_to: "2024-02-29" }, // a 12-month period ending on a leap day (366 days)
+    { p_from: "2024-01-01", p_to: "2024-07-19" }, // 201 days: refused before 0026
+    { ...MARCH, p_limit: 1 }, { ...MARCH, p_limit: 50 },
+  ]) {
     assert.equal((await call(ids.A, args)).error, null, JSON.stringify(args));
   }
+  const year = await run({ p_from: "2024-01-01", p_to: "2024-12-31" });
+  assert.deepEqual([year.period.days, year.period.bucket, year.trend.length, year.period.prev_from, year.period.prev_to], [366, "month", 12, "2022-12-31", "2023-12-31"],
+    "a year: 12 monthly buckets; the comparison period is the 366 days before");
 });
 
 test("comparison period: the same number of India days immediately before (partial month vs the same days, leap February)", async () => {
