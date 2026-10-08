@@ -19,11 +19,19 @@ import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { Pagination } from "@/components/ui/Pagination";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
+import { TrainerEditStudentDialog } from "@/components/modules/TrainerEditStudentDialog";
 import type { StudentSummary } from "@/types/student";
 
 const PAGE_SIZE = 5;
 
-export function StudentsTable({ rows }: { rows: StudentSummary[] }) {
+/**
+ * `trainerEdit` is passed by the trainer page only (P3.10-B): "Edit" opens
+ * the trainer edit dialog, and only on rows the server marked editable
+ * (enrolled in an upcoming/ongoing batch the trainer runs). The Super
+ * Admin page renders the table without it — its menu is unchanged.
+ */
+export function StudentsTable({ rows, trainerEdit = false }: { rows: StudentSummary[]; trainerEdit?: boolean }) {
+  const [editTarget, setEditTarget] = useState<{ id: string; name: string } | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(1);
@@ -139,9 +147,15 @@ export function StudentsTable({ rows }: { rows: StudentSummary[] }) {
                     <DropdownItem onClick={() => notImplemented("View profile")}>
                       <Eye className="h-3.5 w-3.5" /> View profile
                     </DropdownItem>
-                    <DropdownItem onClick={() => notImplemented("Edit student")}>
-                      <Pencil className="h-3.5 w-3.5" /> Edit
-                    </DropdownItem>
+                    {!trainerEdit ? (
+                      <DropdownItem onClick={() => notImplemented("Edit student")}>
+                        <Pencil className="h-3.5 w-3.5" /> Edit
+                      </DropdownItem>
+                    ) : s.editable === true ? (
+                      <DropdownItem onClick={() => setEditTarget({ id: s.id, name: s.name })}>
+                        <Pencil className="h-3.5 w-3.5" /> Edit student
+                      </DropdownItem>
+                    ) : null}
                     <DropdownItem onClick={() => notImplemented("Remove student")} className="text-signal-red">
                       <Trash2 className="h-3.5 w-3.5" /> Remove
                     </DropdownItem>
@@ -154,6 +168,8 @@ export function StudentsTable({ rows }: { rows: StudentSummary[] }) {
       )}
 
       <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+
+      {trainerEdit && <TrainerEditStudentDialog student={editTarget} onClose={() => setEditTarget(null)} />}
     </div>
   );
 }

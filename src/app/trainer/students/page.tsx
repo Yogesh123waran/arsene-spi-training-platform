@@ -25,7 +25,7 @@ export default async function TrainerStudentsPage() {
       {loadError ? (
         <ErrorState title="We couldn't load your students" description={loadError} />
       ) : (
-        <StudentsTable rows={students} />
+        <StudentsTable rows={students} trainerEdit />
       )}
     </div>
   );

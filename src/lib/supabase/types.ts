@@ -1739,6 +1739,11 @@ export type Database = {
         Args: { p_student_id: string; p: Json };
         Returns: Json;
       };
+      /** 0017, caller's session: an active trainer edits an in-scope student (full_name, phone, organization, designation). Returns { ok, fields?, reason? }. */
+      trainer_update_student: {
+        Args: { p_student_id: string; p: Json };
+        Returns: Json;
+      };
       /** Name + contact details of a trainer. Returns { ok, reason?, fields? }. */
       admin_update_trainer: {
         Args: { p_trainer_id: string; p: Json };

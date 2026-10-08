@@ -51,4 +51,9 @@ export interface StudentSummary {
   /** No data source yet in Supabase mode (needs Tests) — undefined shows "—". */
   performance?: number;
   status: UserStatus;
+  /**
+   * Trainer list only (P3.10-B), computed server-side: the trainer may edit this student
+   * (enrolled in an upcoming/ongoing batch they run). A UI hint — the database decides.
+   */
+  editable?: boolean;
 }

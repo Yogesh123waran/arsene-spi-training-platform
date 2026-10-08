@@ -99,6 +99,10 @@ try {
     "src/lib/enrollments/enrollment.ts",
     "src/repositories/enrollment.repository.core.ts",
     "src/services/enrollment.service.core.ts",
+    // Trainer student editing (Phase 7 P3.10-B)
+    "src/lib/students/trainer-edit.ts",
+    "src/repositories/students.repository.core.ts",
+    "src/services/students.service.core.ts",
     // Super Admin dashboard reads (D1)
     "src/types/performance.ts",
     "src/lib/dashboard/periods.ts",

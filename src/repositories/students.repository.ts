@@ -2,7 +2,12 @@ import "server-only";
 import { authConfig } from "@/config/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getStudentsForBatches, studentTableRows } from "@/lib/mock/students-table.mock";
+import { EDITABLE_BATCH_STATUSES } from "@/lib/students/trainer-edit";
 import type { StudentSummary } from "@/types/student";
+import { createStudentsWriteRepository } from "./students.repository.core";
+
+/** P3.10-B: the trainer edit path (trainer_update_student) on the caller's own session client. */
+export const studentsWriteRepository = createStudentsWriteRepository(() => createSupabaseServerClient());
 
 /**
  * Students repository — the only module that knows where student data
@@ -14,7 +19,8 @@ import type { StudentSummary } from "@/types/student";
  *     batch_students → batches → courses (0003_core_training_model.sql),
  *     read with the caller's session.
  *
- * Read-only for now (Add/Edit/Remove are a separate future task).
+ * The list is read-only; the one write is the trainer edit (P3.10-B),
+ * which goes through students.repository.core → trainer_update_student.
  * Services call this; UI components never do. RLS is the authoritative
  * boundary: student_details (email) is readable only by super_admin and
  * the student themselves, and trainers only see students in their own
@@ -99,6 +105,9 @@ export const studentsRepository = {
           course: joinOrDash(current.map((b) => b.courses?.title)),
           // attendance / performance: no data source yet — left undefined ("—").
           status: row.status,
+          // P3.10-B: the trainer may edit only a student enrolled in an upcoming/ongoing batch they run —
+          // the same scope trainer_update_student checks (a hint for the UI; the database decides).
+          editable: scope.kind === "trainer" && current.some((b) => (EDITABLE_BATCH_STATUSES as readonly string[]).includes(b.status)),
         });
       }
 
