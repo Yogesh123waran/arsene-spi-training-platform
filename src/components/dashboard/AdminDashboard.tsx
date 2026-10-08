@@ -1,12 +1,11 @@
 import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
-import { AlertTriangle, ArrowDown, ArrowRight, ArrowUp, Award, CalendarDays, CalendarPlus, FileQuestion, Layers, Minus, ShieldCheck, UserPlus } from "lucide-react";
+import { AlertTriangle, Inbox, ArrowDown, ArrowRight, ArrowUp, Award, CalendarDays, CalendarPlus, FileQuestion, Layers, Minus, ShieldCheck, UserPlus, Bell, BookOpen, CalendarClock, CalendarRange, FileCheck2, GraduationCap, HeartPulse, LayoutGrid, LineChart, ListChecks, Target, UserCheck, Users, Zap } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Card, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { ErrorState } from "@/components/ui/ErrorState";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/Table";
 import { TrendChart } from "@/components/dashboard/TrendChart";
@@ -23,6 +22,8 @@ import {
   type DashboardPeriod,
   type DashboardSection,
   type DashboardTest,
+  type HealthKey,
+  type HealthLine,
   type TrainingOverview,
   HEALTH_LABEL,
 } from "@/lib/dashboard/admin-dashboard";
@@ -57,44 +58,81 @@ function calendarDate(isoDate: string, options: Intl.DateTimeFormatOptions = { w
 }
 
 
-function Panel({ id, title, description, action, children, className }: { id: string; title: string; description?: string; action?: { href: string; label: string }; children: ReactNode; className?: string }) {
+function Panel({ id, title, description, action, icon: Icon, children, className }: { id: string; title: string; description?: string; action?: { href: string; label: string }; icon?: LucideIcon; children: ReactNode; className?: string }) {
   return (
     <section aria-labelledby={id} className={className}>
       <Card className="flex h-full flex-col">
-        <div className="flex items-start justify-between gap-4 border-b border-surface-border px-5 py-4">
-          <div>
-            <h2 id={id} className="text-base font-semibold text-ink">
-              {title}
-            </h2>
-            {description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1 border-b border-surface-border px-4 py-3">
+          <div className="flex min-w-0 items-start gap-2.5">
+            {Icon && (
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary-50 text-primary-600" aria-hidden="true">
+                <Icon className="h-4 w-4" />
+              </span>
+            )}
+            <div className="min-w-0">
+              <h2 id={id} className="text-sm font-semibold text-ink">
+                {title}
+              </h2>
+              {description && <p className="mt-0.5 text-xs text-ink-muted">{description}</p>}
+            </div>
           </div>
           {action && (
-            <Link href={action.href} className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-signal-blue hover:underline">
+            <Link href={action.href} className="inline-flex shrink-0 items-center gap-1 pt-1 text-xs font-medium text-signal-blue hover:underline">
               {action.label} <ArrowRight className="h-3 w-3" aria-hidden />
             </Link>
           )}
         </div>
-        <CardContent className="flex-1">{children}</CardContent>
+        <CardContent className="flex-1 px-4 py-3">{children}</CardContent>
       </Card>
     </section>
   );
 }
 
+/** Compact section error (same visual language as the compact empty state); the page-level error stays in page.tsx. */
 function SectionError() {
-  return <ErrorState title="This section couldn't be loaded" description="Please refresh the page. Other sections are unaffected." className="py-8" />;
+  return (
+    <div className="flex items-start gap-2.5 rounded-md bg-signal-redSoft px-3 py-2.5">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-signal-red" aria-hidden />
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-ink">Unable to load this section.</p>
+        <p className="text-xs text-ink-muted">Refresh to retry.</p>
+      </div>
+    </div>
+  );
 }
 
-function Compact({ title, description }: { title: string; description: string }) {
-  return <EmptyState title={title} description={description} className="py-8" />;
+/** D2b-2F: a small empty state (icon, short title, one line of explanation) instead of a large empty box. */
+function Compact({ title, description }: { title: string; description?: string }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-md bg-surface-sunken px-3 py-2.5">
+      <Inbox className="mt-0.5 h-4 w-4 shrink-0 text-ink-faint" aria-hidden />
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-ink">{title}</p>
+        {description && <p className="text-xs text-ink-muted">{description}</p>}
+      </div>
+    </div>
+  );
 }
 
 // ---------------------------------------------------------------- key metrics
 
-const METRICS: { key: Exclude<keyof DashboardMetrics, "comparisons">; label: string; note: string; href: string; linkText: string }[] = [
-  { key: "activeStudents", label: "Active students", note: "Student accounts that can sign in", href: "/admin/users?role=student&status=active", linkText: "View active student accounts" },
-  { key: "activeTrainers", label: "Active trainers", note: "Trainer accounts that can sign in", href: "/admin/users?role=trainer&status=active", linkText: "View active trainer accounts" },
-  { key: "ongoingBatches", label: "Ongoing batches", note: "In progress now", href: "/admin/batches", linkText: "View batches" },
-  { key: "upcomingBatches", label: "Upcoming batches", note: "Not started yet", href: "/admin/batches", linkText: "View batches" },
+type MetricKey = Exclude<keyof DashboardMetrics, "comparisons">;
+
+/** KPI icon tiles — theme tokens only; decorative (the label and the value carry the meaning). */
+const METRIC_ICON: Record<MetricKey, { icon: LucideIcon; tile: string }> = {
+  activeStudents: { icon: Users, tile: "bg-primary-50 text-primary-600" },
+  activeTrainers: { icon: UserCheck, tile: "bg-signal-blueSoft text-signal-blue" },
+  ongoingBatches: { icon: Layers, tile: "bg-brand-goldSoft text-signal-amber" },
+  upcomingBatches: { icon: CalendarRange, tile: "bg-signal-tealSoft text-signal-teal" },
+  classesToday: { icon: CalendarDays, tile: "bg-signal-blueSoft text-signal-blue" },
+  completionsAwaitingApproval: { icon: Award, tile: "bg-brand-goldSoft text-signal-amber" },
+};
+
+const METRICS: { key: MetricKey; label: string; note?: string; href: string; linkText: string }[] = [
+  { key: "activeStudents", label: "Active students", note: "Can sign in", href: "/admin/users?role=student&status=active", linkText: "View active student accounts" },
+  { key: "activeTrainers", label: "Active trainers", note: "Can sign in", href: "/admin/users?role=trainer&status=active", linkText: "View active trainer accounts" },
+  { key: "ongoingBatches", label: "Ongoing batches", href: "/admin/batches", linkText: "View batches" },
+  { key: "upcomingBatches", label: "Upcoming batches", href: "/admin/batches", linkText: "View batches" },
   { key: "classesToday", label: "Classes today", note: "Not cancelled, India time", href: "/admin/classes", linkText: "View classes" },
   { key: "completionsAwaitingApproval", label: "Awaiting approval", note: "Completion recommendations", href: "/admin/certificates", linkText: "Review completions" },
 ];
@@ -110,13 +148,13 @@ function comparisonText(c: Comparison): string {
 function ComparisonLine({ cmp }: { cmp: Comparison }) {
   const Icon = cmp.direction === "up" ? ArrowUp : cmp.direction === "down" ? ArrowDown : Minus;
   return (
-    <span className="mt-0.5 flex items-center gap-1 truncate text-xs text-ink-muted" title={comparisonText(cmp)}>
+    <span className="mt-1 flex flex-wrap items-center gap-x-1 text-2xs text-ink-muted" title={comparisonText(cmp)}>
       <Icon className="h-3 w-3 shrink-0" aria-hidden />
       <span className="font-mono">
         {cmp.direction === "same" ? "0" : `${cmp.difference > 0 ? "+" : "−"}${Math.abs(cmp.difference)}`}
         {cmp.percent !== null && cmp.direction !== "same" ? ` (${cmp.percent > 0 ? "+" : ""}${cmp.percent}%)` : ""}
       </span>
-      <span className="truncate text-ink-faint">{cmp.label}</span>
+      <span className="text-ink-faint">{cmp.label}</span>
     </span>
   );
 }
@@ -137,19 +175,25 @@ function Metrics({ section }: { section: DashboardSection<DashboardMetrics> }) {
       <h2 id="dash-metrics" className="sr-only">
         Key metrics
       </h2>
-      <ul className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         {METRICS.map((m) => {
           const cmp = m.key === "classesToday" || m.key === "completionsAwaitingApproval" ? section.data.comparisons[m.key] : null;
+          const { icon: Icon, tile } = METRIC_ICON[m.key];
           return (
           <li key={m.key}>
             <Link
               href={m.href}
               aria-label={`${m.label}: ${section.data[m.key]}.${cmp ? ` ${comparisonText(cmp)}.` : ""} ${m.linkText}`}
-              className="block h-full rounded-md border border-surface-border border-l-2 border-l-primary-500 bg-surface-raised px-4 py-3 shadow-panel transition-colors hover:bg-surface-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500"
+              className="flex h-full flex-col rounded-md border border-surface-border bg-surface-raised p-3 shadow-panel transition-colors hover:bg-surface-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500"
             >
-              <span className="block truncate text-2xs font-semibold uppercase tracking-wide text-ink-muted">{m.label}</span>
-              <span className="mt-1 block font-mono text-kpi text-ink">{section.data[m.key]}</span>
-              {cmp ? <ComparisonLine cmp={cmp} /> : <span className="mt-0.5 block truncate text-xs text-ink-faint">{m.note}</span>}
+              <span className="flex min-h-8 items-start gap-2">
+                <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded ${tile}`} aria-hidden="true">
+                  <Icon className="h-3.5 w-3.5" />
+                </span>
+                <span className="min-w-0 pt-0.5 text-xs font-medium leading-tight text-ink-muted">{m.label}</span>
+              </span>
+              <span className="mt-2 block text-kpi text-ink">{section.data[m.key]}</span>
+              {cmp ? <ComparisonLine cmp={cmp} /> : m.note && <span className="mt-1 block text-2xs text-ink-faint">{m.note}</span>}
             </Link>
           </li>
           );
@@ -161,32 +205,35 @@ function Metrics({ section }: { section: DashboardSection<DashboardMetrics> }) {
 
 // ---------------------------------------------------------------- attention required
 
+/** Shorter on-screen wording for an item whose read-model reason restates its title. */
+const ATTENTION_REASON: Partial<Record<AttentionItem["key"], string>> = { missing_records: "Role has no matching record." };
+
 function Attention({ section }: { section: DashboardSection<AttentionItem[]> }) {
   if (section.status === "ok" && section.data.length === 0) return null; // nothing needs attention → no section
   return (
     <section aria-labelledby="dash-attention">
-      <Card className="border-l-2 border-l-brand-gold">
-        <div className="flex items-center gap-2 border-b border-surface-border px-5 py-4">
+      <Card className="border-brand-gold/40 bg-brand-goldSoft/30">
+        <div className="flex items-center gap-2 px-4 pt-2.5">
           <AlertTriangle className="h-4 w-4 text-signal-amber" aria-hidden />
-          <h2 id="dash-attention" className="text-base font-semibold text-ink">
+          <h2 id="dash-attention" className="text-sm font-semibold text-signal-amber">
             Attention required
           </h2>
         </div>
-        <CardContent>
+        <CardContent className="px-4 pb-3 pt-2.5">
           {section.status === "error" ? (
             <SectionError />
           ) : (
-            <ul className="divide-y divide-surface-border">
+            <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
               {section.data.map((item) => (
-                <li key={item.key} className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
+                <li key={item.key} className="flex flex-col rounded-md border border-surface-border bg-surface-raised px-3 py-2.5">
                   <div className="flex items-start gap-3">
-                    <span className="min-w-[2.5rem] font-mono text-xl font-semibold text-ink">{item.count}</span>
-                    <div>
-                      <p className="text-sm font-medium text-ink">{item.title}</p>
-                      <p className="text-xs text-ink-muted">{item.reason}</p>
+                    <span className="flex h-7 min-w-7 shrink-0 items-center justify-center rounded-full bg-brand-goldSoft px-1.5 font-mono text-sm font-semibold text-ink">{item.count}</span>
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-semibold text-ink">{item.title}</p>
+                      <p className="mt-0.5 text-xs text-ink-muted">{ATTENTION_REASON[item.key] ?? item.reason}</p>
                     </div>
                   </div>
-                  <Link href={item.href} className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-signal-blue hover:underline sm:ml-4">
+                  <Link href={item.href} className="mt-auto inline-flex items-center gap-1 pt-2 text-xs font-medium text-signal-blue hover:underline">
                     {item.linkLabel} <ArrowRight className="h-3 w-3" aria-hidden />
                   </Link>
                 </li>
@@ -229,11 +276,11 @@ function ClassList({ classes, showDate }: { classes: DashboardClass[]; showDate:
 
 function TodayClasses({ section, today }: { section: AdminDashboardData["todayClasses"]; today: string }) {
   return (
-    <Panel id="dash-today" title="Today's classes" description={calendarDate(today, { weekday: "long", day: "2-digit", month: "short" })} action={{ href: "/admin/classes", label: "View all classes" }}>
+    <Panel id="dash-today" icon={CalendarDays} title="Today's classes" description={calendarDate(today, { weekday: "long", day: "2-digit", month: "short" })} action={{ href: "/admin/classes", label: "View all classes" }}>
       {section.status === "error" ? (
         <SectionError />
       ) : section.data.classes.length === 0 ? (
-        <Compact title="No classes today" description="Nothing is scheduled for today (India time)." />
+        <Compact title="No classes today" />
       ) : (
         <>
           <ClassList classes={section.data.classes} showDate={false} />
@@ -250,11 +297,11 @@ function TodayClasses({ section, today }: { section: AdminDashboardData["todayCl
 
 function UpcomingClasses({ section }: { section: AdminDashboardData["upcomingClasses"] }) {
   return (
-    <Panel id="dash-upcoming-classes" title="Upcoming classes" description="Next scheduled, after today" action={{ href: "/admin/classes", label: "View all classes" }}>
+    <Panel id="dash-upcoming-classes" icon={CalendarClock} title="Upcoming classes" description="Next scheduled, after today" action={{ href: "/admin/classes", label: "View all classes" }}>
       {section.status === "error" ? (
         <SectionError />
       ) : section.data.length === 0 ? (
-        <Compact title="No upcoming classes" description="No classes are scheduled after today." />
+        <Compact title="No upcoming classes" />
       ) : (
         <ClassList classes={section.data} showDate />
       )}
@@ -269,11 +316,11 @@ function testWindow(t: DashboardTest): string {
 
 function UpcomingTests({ section }: { section: AdminDashboardData["upcomingTests"] }) {
   return (
-    <Panel id="dash-tests" title="Upcoming tests" description="Published tests that are open or about to open" action={{ href: "/admin/tests", label: "View all tests" }}>
+    <Panel id="dash-tests" icon={FileCheck2} title="Upcoming tests" description="Open or opening soon" action={{ href: "/admin/tests", label: "View all tests" }}>
       {section.status === "error" ? (
         <SectionError />
       ) : section.data.length === 0 ? (
-        <Compact title="No upcoming tests" description="No published test is open or scheduled." />
+        <Compact title="No upcoming tests" />
       ) : (
         <ul className="divide-y divide-surface-border">
           {section.data.map((t) => (
@@ -303,29 +350,29 @@ function UpcomingTests({ section }: { section: AdminDashboardData["upcomingTests
 
 function Overview({ section }: { section: DashboardSection<TrainingOverview> }) {
   return (
-    <Panel id="dash-overview" title="Training overview" description="Batches by status" action={{ href: "/admin/batches", label: "View all batches" }}>
+    <Panel id="dash-overview" icon={LayoutGrid} title="Training overview" description="Batches by status">
       {section.status === "error" ? (
         <SectionError />
       ) : (
-        <div className="flex flex-col gap-5">
-          <dl className="grid grid-cols-2 gap-3">
+        <div className="flex flex-col gap-3">
+          <dl className="grid grid-cols-4 divide-x divide-surface-border rounded-md border border-surface-border">
             {BATCH_STATUS_ORDER.map((s) => (
-              <div key={s} className="rounded-md border border-surface-border px-3 py-2">
-                <dt className="text-xs text-ink-muted">{BATCH_STATUS_LABEL[s]}</dt>
-                <dd className="font-mono text-xl font-semibold text-ink">{section.data.batches[s]}</dd>
+              <div key={s} className="flex min-w-0 flex-col-reverse px-0.5 py-1.5 text-center">
+                <dt className="break-words text-2xs text-ink-muted">{BATCH_STATUS_LABEL[s]}</dt>
+                <dd className="font-mono text-base font-semibold text-ink">{section.data.batches[s]}</dd>
               </div>
             ))}
           </dl>
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Courses with current batches</h3>
+            <h3 className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">Courses with current batches</h3>
             {section.data.courses.length === 0 ? (
               <p className="mt-2 text-sm text-ink-muted">No course has an upcoming or ongoing batch.</p>
             ) : (
               <>
-                <ul className="mt-2 divide-y divide-surface-border">
+                <ul className="mt-1 divide-y divide-surface-border">
                   {section.data.courses.map((c) => (
-                    <li key={c.courseId} className="flex items-center justify-between gap-3 py-1.5 text-sm">
-                      <span className="truncate text-ink">{c.course}</span>
+                    <li key={c.courseId} className="flex items-center justify-between gap-3 py-1 text-xs">
+                      <span className="min-w-0 break-words text-ink">{c.course}</span>
                       <span className="shrink-0 font-mono text-xs text-ink-muted">
                         {c.currentBatches} {c.currentBatches === 1 ? "batch" : "batches"}
                       </span>
@@ -362,32 +409,39 @@ function PanelLoading({ id, title, className }: { id: string; title: string; cla
   );
 }
 
+/** An analytics panel whose data could not be loaded — the same compact message as any other section. */
 function AnalyticsUnavailable() {
-  return <ErrorState title="Advanced analytics are temporarily unavailable." description="Please refresh the page. Other sections are unaffected." className="py-8" />;
+  return <SectionError />;
 }
 
 const periodText = (p: AnalyticsPeriod) => `${p.label} · ${p.rangeText} vs ${p.prevRangeText}`;
+/** Panel subtitle: the period only — the exact dates are shown once, in the page header. */
+const periodShort = (p: AnalyticsPeriod) => `${p.label} vs previous period`;
 
+/** The change in pp (arrow + value); the previous figure is read out to screen readers, not repeated on screen. */
 function ComparisonText({ c }: { c: RateComparison }) {
-  if (c.state === "no_data") return <span className="text-ink-faint">No data in this period</span>;
-  if (c.state === "no_comparison") return <span className="text-ink-faint">No comparison data</span>;
+  if (c.state === "no_data") return <span className="text-ink-faint">No data</span>;
+  if (c.state === "no_comparison") return <span className="text-ink-faint">No comparison</span>;
   const Icon = c.points === null || c.points === 0 ? Minus : c.points > 0 ? ArrowUp : ArrowDown;
   return (
     <span className="inline-flex items-center gap-1 text-ink-muted">
       <Icon className="h-3 w-3" aria-hidden />
       <span className="font-mono">{formatPoints(c)}</span>
-      <span className="text-ink-faint">vs {formatPercent(c.previous)} before</span>
+      <span className="sr-only">vs {formatPercent(c.previous)} before</span>
     </span>
   );
 }
+
+/** "1 released result" / "4 released results" — the nouns from the read model are plural. */
+const countText = (n: number, pluralNoun: string) => `${n} ${n === 1 ? pluralNoun.replace(/s$/, "") : pluralNoun}`;
 
 async function PerformancePanel({ analytics, className }: { analytics: Promise<DashboardAnalyticsResult>; className?: string }) {
   const { panels } = await analytics;
   return (
     <Panel
-      id="dash-performance"
+      id="dash-performance" icon={LineChart}
       title="Training performance"
-      description={panels.status === "ok" ? periodText(panels.data.period) : undefined}
+      description={panels.status === "ok" ? periodShort(panels.data.period) : undefined}
       action={{ href: "/admin/performance", label: "View detailed performance" }}
       className={className}
     >
@@ -396,27 +450,27 @@ async function PerformancePanel({ analytics, className }: { analytics: Promise<D
       ) : !panels.data.hasActivity ? (
         <Compact
           title="No activity in this period"
-          description={`No released test results, attendance records or scored assignments between ${panels.data.period.rangeText}.${panels.data.hasComparison ? "" : " The comparison period has none either."}`}
+          description="No test results, attendance or scored assignments this period."
         />
       ) : (
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-4">
           <dl className="grid grid-cols-2 gap-3 md:grid-cols-4">
             {panels.data.performance.map((m) => (
               <div key={m.key} className="rounded-md border border-surface-border px-3 py-2">
-                <dt className="text-xs text-ink-muted">{m.label}</dt>
-                <dd className="font-mono text-xl font-semibold text-ink">{formatPercent(m.comparison.current)}</dd>
-                <dd className="text-2xs">
+                <dt className="text-xs font-medium text-ink-muted">{m.label}</dt>
+                <dd className="mt-0.5 font-mono text-2xl font-semibold leading-tight text-ink">{formatPercent(m.comparison.current)}</dd>
+                <dd className="mt-1 text-2xs">
                   <ComparisonText c={m.comparison} />
                 </dd>
                 <dd className="text-2xs text-ink-faint">
-                  {m.evidence.current} {m.evidenceNoun} · {m.evidence.display === "—" ? "none before" : `${m.evidence.display} vs before`}
+                  {countText(m.evidence.current, m.evidenceNoun)}
                 </dd>
               </div>
             ))}
           </dl>
           <figure aria-labelledby="dash-trend-caption">
-            <figcaption id="dash-trend-caption" className="text-xs font-semibold uppercase tracking-wide text-ink-muted">
-              {panels.data.period.bucket === "week" ? "Weekly" : "Monthly"} trend (India time) — gaps mean no data in that {panels.data.period.bucket}
+            <figcaption id="dash-trend-caption" className="text-2xs font-semibold uppercase tracking-wide text-ink-muted">
+              {panels.data.period.bucket === "week" ? "Weekly" : "Monthly"} trend · gaps = no data
             </figcaption>
             <div className="mt-2">
               <TrendChart points={panels.data.trend} captionId="dash-trend-caption" />
@@ -429,11 +483,55 @@ async function PerformancePanel({ analytics, className }: { analytics: Promise<D
 }
 
 const HEALTH_TONE = { healthy: "green", watch: "amber", attention: "red", no_data: "neutral", unavailable: "neutral" } as const;
+/** Decorative scan aid beside each line; the Badge text carries the status. */
+const HEALTH_DOT = { healthy: "bg-signal-green", watch: "bg-signal-amber", attention: "bg-signal-red", no_data: "bg-ink-faint", unavailable: "bg-ink-faint" } as const;
+
+/**
+ * Short on-screen reasons (D2b-2F follow-up). The status still comes from the read model unchanged; "No data" lines
+ * get one plain phrase, and judged lines drop their parenthetical method detail (thresholds, n = …).
+ */
+const HEALTH_NO_DATA_REASON: Partial<Record<HealthKey, string>> = {
+  attendance: "Not enough attendance data.",
+  assessment: "Not enough released results.",
+  assignments: "Not enough scored submissions.",
+  students: "Not enough attendance per student.",
+};
+function healthReason(h: HealthLine): string {
+  if (h.status === "no_data" && HEALTH_NO_DATA_REASON[h.key]) return HEALTH_NO_DATA_REASON[h.key] as string;
+  return h.reason.replace(/\s*\([^)]*\)/g, "");
+}
+
+/**
+ * "No data" (or "Unavailable") lines collapse into one row — "No data: Attendance, Assessment, Students" — instead of
+ * one row each. Every indicator stays named on screen; its short reason is read out to screen readers.
+ */
+function HealthGroup({ status, lines, note }: { status: "no_data" | "unavailable"; lines: HealthLine[]; note?: string }) {
+  const group = lines.filter((h) => h.status === status);
+  if (group.length === 0) return null;
+  return (
+    <li className="py-2 first:pt-0 last:pb-0">
+      <p className="flex min-w-0 items-start gap-2 text-sm text-ink">
+        <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${HEALTH_DOT[status]}`} aria-hidden="true" />
+        <span className="min-w-0">
+          <span className="font-medium">{HEALTH_LABEL[status]}:</span>{" "}
+          {group.map((h, i) => (
+            <span key={h.key}>
+              {i > 0 && ", "}
+              {h.label}
+              {!note && <span className="sr-only"> ({healthReason(h).replace(/\.$/, "")})</span>}
+            </span>
+          ))}
+        </span>
+      </p>
+      {note && <p className="mt-0.5 pl-4 text-xs text-ink-muted">{note}</p>}
+    </li>
+  );
+}
 
 async function TrainingHealthPanel({ analytics, className }: { analytics: Promise<DashboardAnalyticsResult>; className?: string }) {
   const { health } = await analytics;
   return (
-    <Panel id="dash-health" title="Training health" description="Worst line wins · each status shows the database fact behind it" className={className}>
+    <Panel id="dash-health" icon={HeartPulse} title="Training health" className={className}>
       {health.status === "error" ? (
         <SectionError />
       ) : (
@@ -448,20 +546,25 @@ async function TrainingHealthPanel({ analytics, className }: { analytics: Promis
             </span>
           </div>
           <ul className="divide-y divide-surface-border">
-            {health.data.lines.map((h) => (
-              <li key={h.key} className="py-3 first:pt-0 last:pb-0">
+            {health.data.lines.filter((h) => h.status !== "no_data" && h.status !== "unavailable").map((h) => (
+              <li key={h.key} className="py-2 first:pt-0 last:pb-0">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-sm font-medium text-ink">{h.label}</span>
+                  <span className="flex min-w-0 items-center gap-2 text-sm font-medium text-ink">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${HEALTH_DOT[h.status]}`} aria-hidden="true" />
+                    {h.label}
+                  </span>
                   <Badge tone={HEALTH_TONE[h.status]}>{HEALTH_LABEL[h.status]}</Badge>
                 </div>
-                <p className="mt-1 text-xs text-ink-muted">{h.reason}</p>
+                <p className="mt-0.5 pl-4 text-xs text-ink-muted">{healthReason(h)}</p>
                 {(h.status === "watch" || h.status === "attention") && (
-                  <Link href={h.href} className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-signal-blue hover:underline">
+                  <Link href={h.href} className="ml-4 mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-signal-blue hover:underline">
                     {h.linkLabel} <ArrowRight className="h-3 w-3" aria-hidden />
                   </Link>
                 )}
               </li>
             ))}
+            <HealthGroup status="no_data" lines={health.data.lines} />
+            <HealthGroup status="unavailable" lines={health.data.lines} note="Unable to load this section. Refresh to retry." />
           </ul>
         </>
       )}
@@ -472,22 +575,20 @@ async function TrainingHealthPanel({ analytics, className }: { analytics: Promis
 const BAND_TONE = { healthy: "green", watch: "amber", attention: "red" } as const;
 const BAND_BAR = { healthy: "bg-signal-green", watch: "bg-signal-amber", attention: "bg-signal-red" } as const;
 
-async function WeakTopicsPanel({ analytics }: { analytics: Promise<DashboardAnalyticsResult> }) {
+async function WeakTopicsPanel({ analytics, className }: { analytics: Promise<DashboardAnalyticsResult>; className?: string }) {
   const { panels } = await analytics;
   return (
     <Panel
-      id="dash-topics"
+      id="dash-topics" icon={Target}
       title="Weak Topics"
-      description={panels.status === "ok" ? `${panels.data.period.label} · ${panels.data.period.rangeText} · Healthy ≥ 80%, Watch ≥ 65%, Attention < 65%` : undefined}
+      description={panels.status === "ok" ? panels.data.period.label : undefined}
       action={{ href: "/admin/performance", label: "View module performance" }}
+      className={className}
     >
       {panels.status === "error" ? (
         <AnalyticsUnavailable />
       ) : panels.data.topics.length === 0 ? (
-        <Compact
-          title="Insufficient data"
-          description={`No module has 5 or more graded answers in this period (released results: n = ${panels.data.resultsInPeriod}).`}
-        />
+        <Compact title="Not enough data yet" description="Not enough graded answers this period." />
       ) : (
         <ul className="flex flex-col gap-3">
           {panels.data.topics.map((t) => (
@@ -502,11 +603,12 @@ async function WeakTopicsPanel({ analytics }: { analytics: Promise<DashboardAnal
               <div className="mt-1 h-1.5 w-full overflow-hidden rounded-sm bg-surface-sunken" aria-hidden="true">
                 <div className={`h-full ${BAND_BAR[t.band]}`} style={{ width: `${Math.max(0, Math.min(100, t.percent))}%` }} />
               </div>
-              <p className="mt-0.5 text-2xs text-ink-faint">{t.answers} graded answers</p>
+              <span className="sr-only">{countText(t.answers, "graded answers")}</span>
             </li>
           ))}
         </ul>
       )}
+      {panels.status === "ok" && panels.data.topics.length > 0 && <p className="mt-3 text-2xs text-ink-faint">Healthy ≥ 80% · Watch ≥ 65% · Attention &lt; 65%</p>}
     </Panel>
   );
 }
@@ -561,7 +663,7 @@ function CourseProgressItem({ row }: { row: CourseProgressRow }) {
 async function CourseProgressPanel({ analytics }: { analytics: Promise<DashboardAnalyticsResult> }) {
   const { panels } = await analytics;
   return (
-    <Panel id="dash-progress" title="Course Progress" description="Current delivery and enrolment progress" action={{ href: "/admin/courses", label: "View all courses" }}>
+    <Panel id="dash-progress" icon={ListChecks} title="Course Progress" description="Current delivery and enrolment progress" action={{ href: "/admin/courses", label: "View all courses" }}>
       {panels.status === "error" ? (
         <AnalyticsUnavailable />
       ) : panels.data.progress.empty ? (
@@ -588,6 +690,12 @@ async function CourseProgressPanel({ analytics }: { analytics: Promise<Dashboard
 const TREND_ARROW = { up: "↑", down: "↓", neutral: "→", none: "" } as const;
 const TREND_TONE = { up: "text-signal-green", down: "text-signal-red", neutral: "text-ink-muted", none: "text-ink-faint" } as const;
 const SP_HEAD = "px-2 py-2 text-left text-2xs font-semibold uppercase tracking-wide text-ink-muted";
+/**
+ * D2b-2F: the panel is one grid column (≈300–360px) below sm and from lg, too narrow for four columns — there the
+ * trend sits under the average in the same row; the separate Trend column shows only where the panel is wide (sm–lg).
+ */
+const SP_TREND_COLUMN = "hidden sm:table-cell lg:hidden";
+const SP_TREND_STACKED = "mt-0.5 block font-sans font-normal sm:hidden lg:block";
 
 function TrendCell({ row }: { row: StudentPerformanceRow }) {
   if (row.trendDirection === "none") return <span className="text-xs text-ink-faint">{row.trendDisplay}</span>;
@@ -600,30 +708,35 @@ function TrendCell({ row }: { row: StudentPerformanceRow }) {
   );
 }
 
+/** Shorter on-screen caption; same facts as the read model's caption (ranking window 366 days, trend vs the previous period). */
+const STUDENT_CAPTION = "Ranked over the last 366 days · trend vs previous period";
+
 async function StudentPerformancePanel({ analytics }: { analytics: Promise<DashboardAnalyticsResult> }) {
   const { panels } = await analytics;
   return (
-    <Panel id="dash-students" title="Student Performance (Top 5)" description="By average score" action={{ href: "/admin/performance", label: "View detailed performance" }}>
+    <Panel id="dash-students" icon={GraduationCap} title="Student Performance (Top 5)" action={{ href: "/admin/performance", label: "View detailed performance" }}>
       {panels.status === "error" ? (
         <AnalyticsUnavailable />
       ) : panels.data.students.insufficient ? (
-        <Compact title="Insufficient data" description="No student has 3 or more released results in the last 366 days" />
+        <Compact title="Insufficient data" description="Needs 3+ released results per student (last 366 days)" />
       ) : (
         <>
           <table className="w-full table-fixed border-collapse text-sm">
             <caption className="sr-only">Student Performance (Top 5), by average score</caption>
             <colgroup>
-              <col className="w-9" />
+              <col className="w-12" />
               <col />
-              <col className="w-20" />
-              <col className="w-28" />
+              <col className="w-28 sm:w-24 lg:w-28" />
+              <col className="w-0 sm:w-28 lg:w-0" />
             </colgroup>
             <thead className="border-b border-surface-border bg-surface-sunken">
               <tr>
-                <th scope="col" className={SP_HEAD}>#</th>
-                <th scope="col" className={SP_HEAD}>Student Name</th>
-                <th scope="col" className={`${SP_HEAD} text-right`}>Test Avg</th>
-                <th scope="col" className={`${SP_HEAD} text-right`}>Trend</th>
+                <th scope="col" className={SP_HEAD}>Rank</th>
+                <th scope="col" className={SP_HEAD}>Student</th>
+                <th scope="col" className={`${SP_HEAD} text-right`}>
+                  Average score<span className="sm:hidden lg:inline"> / Trend</span>
+                </th>
+                <th scope="col" className={`${SP_HEAD} text-right ${SP_TREND_COLUMN}`}>Trend</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-surface-border">
@@ -634,17 +747,22 @@ async function StudentPerformancePanel({ analytics }: { analytics: Promise<Dashb
                   </td>
                   <td className="min-w-0 px-2 py-2 align-top">
                     <span className="block break-words font-medium text-ink">{s.name}</span>
-                    {s.code && <span className="block break-all font-mono text-2xs text-ink-faint">{s.code}</span>}
+                    {s.code && <span className="block break-words font-mono text-2xs text-ink-faint">{s.code}</span>}
                   </td>
-                  <td className="px-2 py-2 text-right align-top font-mono text-sm font-semibold text-ink">{s.averageDisplay}</td>
-                  <td className="px-2 py-2 text-right align-top">
+                  <td className="px-2 py-2 text-right align-top font-mono text-sm font-semibold text-ink">
+                    {s.averageDisplay}
+                    <span className={SP_TREND_STACKED}>
+                      <TrendCell row={s} />
+                    </span>
+                  </td>
+                  <td className={`px-2 py-2 text-right align-top ${SP_TREND_COLUMN}`}>
                     <TrendCell row={s} />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="mt-3 text-2xs text-ink-faint">{panels.data.students.caption}</p>
+          <p className="mt-3 text-2xs text-ink-faint">{STUDENT_CAPTION}</p>
         </>
       )}
     </Panel>
@@ -653,134 +771,177 @@ async function StudentPerformancePanel({ analytics }: { analytics: Promise<Dashb
 
 // ---------------------------------------------------------------- batch / course comparison (D2b-2B: period-based, streamed)
 
-/** pp change only where 0024 has a previous figure; otherwise "No comparison data" (never 0 pp). */
+/** pp change only where 0024 has a previous figure (never 0 pp); a missing comparison is read out, not printed in every cell. */
 function ChangeText({ change }: { change: FigureChange }) {
-  if (change.comparison.state !== "change") return <span className="text-ink-faint">No comparison data</span>;
+  if (change.comparison.state !== "change") return <span className="sr-only">No comparison data</span>;
   return (
     <span>
-      <ComparisonText c={change.comparison} /> <span className="text-ink-faint">· {change.previousEvidence} before</span>
+      <ComparisonText c={change.comparison} />
+      <span className="sr-only"> · {countText(change.previousEvidence, "records")} before</span>
     </span>
   );
 }
 
-/** One figure: the value (or "Insufficient data (n)"), the records behind it, and its change when there is one. */
-function FigureItem({ label, figure, noun, change }: { label: string; figure: EvidenceFigure; noun: string; change?: FigureChange }) {
+/**
+ * D2b-2F compact comparison tables: a real table from 900px; below that each row stacks into label / value pairs
+ * (the label comes from data-label), so nothing scrolls sideways. 900px, not md: from 768px the sidebar takes
+ * ~256px and the single-column panel (~450–560px) is narrower than the six-column batch table.
+ */
+const CMP_TABLE = "block w-full border-collapse text-sm min-[900px]:table";
+const CMP_HEAD = "px-2 py-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-muted";
+const CMP_ROW = "block border-b border-surface-border py-2 last:border-b-0 min-[900px]:table-row min-[900px]:py-0";
+const CMP_NAME = "block pb-1 min-[900px]:table-cell min-[900px]:px-2 min-[900px]:py-2 min-[900px]:align-top";
+const CMP_FIGURE =
+  "flex items-baseline justify-between gap-3 py-0.5 before:text-2xs before:text-ink-muted before:content-[attr(data-label)] min-[900px]:table-cell min-[900px]:px-2 min-[900px]:py-2 min-[900px]:text-right min-[900px]:align-top min-[900px]:before:content-none";
+
+/**
+ * One figure: the value and its change when there is one. Insufficient data shows "—" (the read model's
+ * "Insufficient data (n)" and the record count are read out to screen readers, not printed in every cell).
+ */
+function FigureCell({ label, figure, noun, change }: { label: string; figure: EvidenceFigure; noun: string; change?: FigureChange }) {
+  if (figure.value === null) {
+    return (
+      <td data-label={label} className={CMP_FIGURE}>
+        <span className="text-right font-mono text-sm text-ink-faint">
+          <span aria-hidden="true">—</span>
+          <span className="sr-only">Insufficient data, {countText(figure.evidence, noun)}</span>
+        </span>
+      </td>
+    );
+  }
   return (
-    <div className="min-w-0">
-      <dt className="text-2xs text-ink-muted">{label}</dt>
-      <dd className={figure.value === null ? "text-xs text-ink-faint" : "font-mono text-sm font-semibold text-ink"}>{figure.display}</dd>
-      {figure.value !== null && (
-        <dd className="text-2xs text-ink-faint">
-          {figure.evidence} {noun}
-        </dd>
-      )}
-      {change && (
-        <dd className="text-2xs">
-          <ChangeText change={change} />
-        </dd>
-      )}
-    </div>
+    <td data-label={label} className={CMP_FIGURE}>
+      <span className="min-w-0 text-right">
+        <span className="block font-mono text-sm font-semibold text-ink">{figure.display}</span>
+        <span className="sr-only">{countText(figure.evidence, noun)}</span>
+        {change && (
+          <span className="block text-2xs">
+            <ChangeText change={change} />
+          </span>
+        )}
+      </span>
+    </td>
   );
 }
 
 function ShownText({ text, order }: { text: string | null; order: "name" | "title" }) {
-  return text ? <p className="mt-3 text-2xs text-ink-faint">{text} · listed by {order}</p> : null;
+  return text ? <p className="mt-2 text-2xs text-ink-faint">{text} · listed by {order}</p> : null;
 }
 
-async function BatchComparisonPanel({ analytics }: { analytics: Promise<DashboardAnalyticsResult> }) {
+const EVIDENCE_NOTE = "— = not enough data this period.";
+
+async function BatchComparisonPanel({ analytics, className }: { analytics: Promise<DashboardAnalyticsResult>; className?: string }) {
   const { panels } = await analytics;
   return (
     <Panel
-      id="dash-batches"
+      id="dash-batches" icon={Layers}
       title="Batch comparison"
-      description={panels.status === "ok" ? `${periodText(panels.data.period)} · listed by name` : undefined}
+      description={panels.status === "ok" ? periodShort(panels.data.period) : undefined}
       action={{ href: "/admin/batches", label: "View all batches" }}
+      className={className}
     >
       {panels.status === "error" ? (
         <AnalyticsUnavailable />
       ) : panels.data.batches.rows.length === 0 ? (
-        <Compact
-          title="No batch activity in this period"
-          description={`No batch has released test results, attendance records or scored assignments between ${panels.data.period.rangeText}, and no batch is ongoing.`}
-        />
+        <Compact title="No batch activity in this period" description="No results, attendance or assignments this period." />
       ) : (
         <>
-          <ul className="divide-y divide-surface-border">
-            {panels.data.batches.rows.map((b) => (
-              <li key={b.id} className="py-3 first:pt-0 last:pb-0">
-                <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
-                  <div className="min-w-0">
+          <table className={CMP_TABLE}>
+            <caption className="sr-only">Batch comparison, {periodText(panels.data.period)}</caption>
+            <thead className="hidden border-b border-surface-border bg-surface-sunken min-[900px]:table-header-group">
+              <tr>
+                <th scope="col" className={`${CMP_HEAD} text-left`}>Batch</th>
+                <th scope="col" className={`${CMP_HEAD} text-right`}>Test average</th>
+                <th scope="col" className={`${CMP_HEAD} text-right`}>Pass rate</th>
+                <th scope="col" className={`${CMP_HEAD} text-right`}>Attendance</th>
+                <th scope="col" className={`${CMP_HEAD} text-right`}>Assignment average</th>
+                <th scope="col" className={`${CMP_HEAD} text-right`}>Completion (current)</th>
+              </tr>
+            </thead>
+            <tbody className="block divide-surface-border min-[900px]:table-row-group min-[900px]:divide-y">
+              {panels.data.batches.rows.map((b) => (
+                <tr key={b.id} className={CMP_ROW}>
+                  <td className={CMP_NAME}>
                     <Link href={b.href} className="break-words text-sm font-medium text-ink hover:underline">
                       {b.name}
                     </Link>
-                    <p className="break-words text-2xs text-ink-faint">
-                      <span className="font-mono">{b.code}</span> · {b.course} · {b.students} students enrolled (current)
-                    </p>
-                  </div>
-                  <Link href={b.performanceHref} className="inline-flex shrink-0 items-center gap-1 text-xs font-medium text-signal-blue hover:underline">
-                    View performance<span className="sr-only"> of {b.name}</span> <ArrowRight className="h-3 w-3" aria-hidden />
-                  </Link>
-                </div>
-                <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
-                  <FigureItem label="Test average" figure={b.testAvg} noun="released results" change={b.testAvgChange} />
-                  <FigureItem label="Pass rate" figure={b.passRate} noun="released results" />
-                  <FigureItem label="Attendance" figure={b.attendance} noun="attendance records" change={b.attendanceChange} />
-                  <FigureItem label="Assignment average" figure={b.assignmentAvg} noun="scored submissions" />
-                  <div className="min-w-0">
-                    <dt className="text-2xs text-ink-muted">Completion (current)</dt>
-                    <dd className="font-mono text-sm font-semibold text-ink">{b.completionDisplay}</dd>
-                    <dd className="text-2xs text-ink-faint">of enrolments now, not this period</dd>
-                  </div>
-                </dl>
-              </li>
-            ))}
-          </ul>
+                    <span className="block break-words text-2xs text-ink-faint">
+                      {b.code !== b.name && (
+                        <>
+                          <span className="font-mono">{b.code}</span> ·{" "}
+                        </>
+                      )}
+                      {b.course} · {countText(b.students, "students")} enrolled (current)
+                    </span>
+                    <Link href={b.performanceHref} className="inline-flex items-center gap-1 text-2xs font-medium text-signal-blue hover:underline">
+                      View performance<span className="sr-only"> of {b.name}</span> <ArrowRight className="h-3 w-3" aria-hidden />
+                    </Link>
+                  </td>
+                  <FigureCell label="Test average" figure={b.testAvg} noun="released results" change={b.testAvgChange} />
+                  <FigureCell label="Pass rate" figure={b.passRate} noun="released results" />
+                  <FigureCell label="Attendance" figure={b.attendance} noun="attendance records" change={b.attendanceChange} />
+                  <FigureCell label="Assignment average" figure={b.assignmentAvg} noun="scored submissions" />
+                  <td data-label="Completion (current)" className={CMP_FIGURE}>
+                    <span className="font-mono text-sm font-semibold text-ink">{b.completionDisplay}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
           <ShownText text={panels.data.batches.shownText} order="name" />
+          <p className="mt-2 text-2xs text-ink-faint">Completion (current) is of enrolments now, not this period. {EVIDENCE_NOTE}</p>
         </>
       )}
     </Panel>
   );
 }
 
-async function CourseComparisonPanel({ analytics }: { analytics: Promise<DashboardAnalyticsResult> }) {
+async function CourseComparisonPanel({ analytics, className }: { analytics: Promise<DashboardAnalyticsResult>; className?: string }) {
   const { panels } = await analytics;
   return (
     <Panel
-      id="dash-courses"
+      id="dash-courses" icon={BookOpen}
       title="Course comparison"
-      description={panels.status === "ok" ? `${periodText(panels.data.period)} · listed by title` : undefined}
+      description={panels.status === "ok" ? periodShort(panels.data.period) : undefined}
       action={{ href: "/admin/courses", label: "View all courses" }}
+      className={className}
     >
       {panels.status === "error" ? (
         <AnalyticsUnavailable />
       ) : panels.data.courses.rows.length === 0 ? (
-        <Compact
-          title="No course activity in this period"
-          description={`No course has a batch with released test results, attendance records or scored assignments between ${panels.data.period.rangeText}, or an ongoing batch.`}
-        />
+        <Compact title="No course activity in this period" description="No results, attendance or assignments this period." />
       ) : (
         <>
-          <ul className="divide-y divide-surface-border">
-            {panels.data.courses.rows.map((c) => (
-              <li key={c.id} className="py-3 first:pt-0 last:pb-0">
-                <div className="min-w-0">
-                  <Link href={c.href} className="break-words text-sm font-medium text-ink hover:underline">
-                    {c.title}
-                  </Link>
-                  <p className="text-2xs text-ink-faint">
-                    <span className="font-mono">{c.code}</span>
-                  </p>
-                </div>
-                <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
-                  <FigureItem label="Test average" figure={c.testAvg} noun="released results" change={c.testAvgChange} />
-                  <FigureItem label="Pass rate" figure={c.passRate} noun="released results" />
-                  <FigureItem label="Attendance" figure={c.attendance} noun="attendance records" />
-                  <FigureItem label="Assignment average" figure={c.assignmentAvg} noun="scored submissions" />
-                </dl>
-              </li>
-            ))}
-          </ul>
+          <table className={CMP_TABLE}>
+            <caption className="sr-only">Course comparison, {periodText(panels.data.period)}</caption>
+            <thead className="hidden border-b border-surface-border bg-surface-sunken min-[900px]:table-header-group">
+              <tr>
+                <th scope="col" className={`${CMP_HEAD} text-left`}>Course</th>
+                <th scope="col" className={`${CMP_HEAD} text-right`}>Test average</th>
+                <th scope="col" className={`${CMP_HEAD} text-right`}>Pass rate</th>
+                <th scope="col" className={`${CMP_HEAD} text-right`}>Attendance</th>
+                <th scope="col" className={`${CMP_HEAD} text-right`}>Assignment average</th>
+              </tr>
+            </thead>
+            <tbody className="block divide-surface-border min-[900px]:table-row-group min-[900px]:divide-y">
+              {panels.data.courses.rows.map((c) => (
+                <tr key={c.id} className={CMP_ROW}>
+                  <td className={CMP_NAME}>
+                    <Link href={c.href} className="break-words text-sm font-medium text-ink hover:underline">
+                      {c.title}
+                    </Link>
+                    <span className="block font-mono text-2xs text-ink-faint">{c.code}</span>
+                  </td>
+                  <FigureCell label="Test average" figure={c.testAvg} noun="released results" change={c.testAvgChange} />
+                  <FigureCell label="Pass rate" figure={c.passRate} noun="released results" />
+                  <FigureCell label="Attendance" figure={c.attendance} noun="attendance records" />
+                  <FigureCell label="Assignment average" figure={c.assignmentAvg} noun="scored submissions" />
+                </tr>
+              ))}
+            </tbody>
+          </table>
           <ShownText text={panels.data.courses.shownText} order="title" />
+          <p className="mt-2 text-2xs text-ink-faint">{EVIDENCE_NOTE}</p>
         </>
       )}
     </Panel>
@@ -789,18 +950,19 @@ async function CourseComparisonPanel({ analytics }: { analytics: Promise<Dashboa
 
 // ---------------------------------------------------------------- pending approvals (completion recommendations)
 
-function PendingApprovalsPanel({ section }: { section: AdminDashboardData["approvals"] }) {
+function PendingApprovalsPanel({ section, className }: { section: AdminDashboardData["approvals"]; className?: string }) {
   return (
     <Panel
-      id="dash-approvals"
+      id="dash-approvals" icon={Award}
       title="Pending completion approvals"
-      description={section.status === "ok" ? `${section.data.total} ${section.data.total === 1 ? "recommendation" : "recommendations"} awaiting a Super Admin decision` : undefined}
+      description="Trainer completion recommendations"
       action={{ href: "/admin/certificates", label: "Review all completions" }}
+      className={className}
     >
       {section.status === "error" ? (
         <SectionError />
       ) : section.data.batches.length === 0 ? (
-        <Compact title="Nothing awaiting approval" description="No trainer recommendation is waiting for a decision." />
+        <Compact title="Nothing awaiting approval" />
       ) : (
         <>
           <Table>
@@ -850,7 +1012,7 @@ function PendingApprovalsPanel({ section }: { section: AdminDashboardData["appro
 function Activity({ section, className }: { section: AdminDashboardData["activity"]; className?: string }) {
   return (
     <Panel
-      id="dash-activity"
+      id="dash-activity" icon={Bell}
       title="Recent activity"
       description={section.status === "ok" && section.data.unreadCount > 0 ? `${section.data.unreadCount} unread notifications` : "Your latest notifications"}
       action={{ href: "/admin/notifications", label: "View all notifications" }}
@@ -859,20 +1021,20 @@ function Activity({ section, className }: { section: AdminDashboardData["activit
       {section.status === "error" ? (
         <SectionError />
       ) : section.data.items.length === 0 ? (
-        <Compact title="No recent activity" description="Notifications for your account will appear here." />
+        <Compact title="No recent activity" description="Your notifications appear here." />
       ) : (
         <ul className="divide-y divide-surface-border">
           {section.data.items.map((n) => (
-            <li key={n.id} className="flex items-start justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+            <li key={n.id} className="flex items-start justify-between gap-3 py-2 first:pt-0 last:pb-0">
               <div className="min-w-0">
                 {n.link ? (
-                  <Link href={n.link} className="block truncate text-sm font-medium text-ink hover:underline">
+                  <Link href={n.link} className="line-clamp-2 break-words text-sm font-medium text-ink hover:underline">
                     {n.title}
                   </Link>
                 ) : (
-                  <p className="truncate text-sm font-medium text-ink">{n.title}</p>
+                  <p className="line-clamp-2 break-words text-sm font-medium text-ink">{n.title}</p>
                 )}
-                {n.body && <p className="line-clamp-2 text-xs text-ink-muted">{n.body}</p>}
+                {n.body && <p className="line-clamp-1 break-words text-xs text-ink-muted">{n.body}</p>}
                 <p className="font-mono text-2xs text-ink-faint">{formatDateTime(n.createdAt)}</p>
               </div>
               {n.unread && (
@@ -891,27 +1053,24 @@ function Activity({ section, className }: { section: AdminDashboardData["activit
 // ---------------------------------------------------------------- quick actions (links to existing workflows only)
 
 const QUICK_ACTIONS = [
-  { href: "/admin/users", label: "Invite user", note: "Users", icon: UserPlus },
-  { href: "/admin/batches/new", label: "Create batch", note: "Batches", icon: Layers },
-  { href: "/admin/classes", label: "Classes", note: "Schedule and review", icon: CalendarDays },
-  { href: "/admin/classes/new", label: "Schedule class", note: "Classes", icon: CalendarPlus },
-  { href: "/admin/tests", label: "Tests", note: "Create and publish", icon: FileQuestion },
-  { href: "/admin/exam-monitoring", label: "Exam monitoring", note: "Live attempts", icon: ShieldCheck },
-  { href: "/admin/certificates", label: "Certificates", note: "Completions", icon: Award },
+  { href: "/admin/users", label: "Invite user", icon: UserPlus },
+  { href: "/admin/batches/new", label: "Create batch", icon: Layers },
+  { href: "/admin/classes", label: "Classes", icon: CalendarDays },
+  { href: "/admin/classes/new", label: "Schedule class", icon: CalendarPlus },
+  { href: "/admin/tests", label: "Tests", icon: FileQuestion },
+  { href: "/admin/exam-monitoring", label: "Exam monitoring", icon: ShieldCheck },
+  { href: "/admin/certificates", label: "Certificates", icon: Award },
 ] as const;
 
 function QuickActions({ className }: { className?: string }) {
   return (
-    <Panel id="dash-actions" title="Quick actions" className={className}>
-      <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-1">
+    <Panel id="dash-actions" icon={Zap} title="Quick actions" className={className}>
+      <ul className="grid grid-cols-2 gap-2">
         {QUICK_ACTIONS.map((a) => (
           <li key={a.href}>
-            <Link href={a.href} className="flex items-center gap-3 rounded-md border border-surface-border px-3 py-2 hover:bg-surface-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500">
-              <a.icon className="h-4 w-4 shrink-0 text-primary-500" aria-hidden />
-              <span className="min-w-0">
-                <span className="block text-sm font-medium text-ink">{a.label}</span>
-                <span className="block text-xs text-ink-muted">{a.note}</span>
-              </span>
+            <Link href={a.href} className="flex h-full items-center gap-2 rounded-md border border-surface-border px-2.5 py-2 hover:bg-surface-sunken focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-500">
+              <a.icon className="h-3.5 w-3.5 shrink-0 text-primary-500" aria-hidden />
+              <span className="min-w-0 break-words text-xs font-medium leading-tight text-ink">{a.label}</span>
             </Link>
           </li>
         ))}
@@ -928,8 +1087,8 @@ export const DASHBOARD_SUBTITLE = "Track performance, manage operations, and ens
 /** Reporting-period selector: plain server links (`?period=`), no client state. */
 function PeriodSelector({ period, today }: { period: DashboardPeriod; today: string }) {
   return (
-    <div className="flex flex-col items-start gap-1.5 sm:items-end">
-      <nav aria-label="Reporting period">
+    <div className="flex min-w-0 flex-col items-start gap-1.5 xl:items-end">
+      <nav aria-label="Reporting period" className="max-w-full">
         <ul className="flex flex-wrap gap-1 rounded-md border border-surface-border bg-surface-raised p-1">
           {PERIOD_KEYS.map((key) => {
             const selected = key === period.key;
@@ -950,7 +1109,7 @@ function PeriodSelector({ period, today }: { period: DashboardPeriod; today: str
           })}
         </ul>
       </nav>
-      <p className="text-2xs text-ink-muted">
+      <p className="text-2xs text-ink-muted xl:text-right">
         <span className="font-medium text-ink">
           {period.label} · {formatDateRange(period.from, period.to)}
         </span>{" "}
@@ -963,52 +1122,49 @@ function PeriodSelector({ period, today }: { period: DashboardPeriod; today: str
 
 export function AdminDashboard({ data, analytics }: { data: AdminDashboardData; analytics: Promise<DashboardAnalyticsResult> }) {
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader title={DASHBOARD_TITLE} description={DASHBOARD_SUBTITLE} actions={<PeriodSelector period={data.period} today={data.today} />} />
-      <Metrics section={data.metrics} />
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+        <PageHeader title={DASHBOARD_TITLE} description={DASHBOARD_SUBTITLE} className="min-w-0 pb-0" />
+        <PeriodSelector period={data.period} today={data.today} />
+      </div>
       <Attention section={data.attention} />
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
+      <Metrics section={data.metrics} />
+      <p role="note" className="-mt-3 text-2xs text-ink-faint">
+        {ATTENDANCE_DEFINITION_NOTE}
+      </p>
+      {/* D2b-2F rows at xl (3 columns): performance + health · batches + course progress · courses + students ·
+          weak topics + overview + quick actions · today + upcoming classes + upcoming tests · activity + approvals.
+          grid-flow-row-dense back-fills the single gap the 2-column (lg) layout would otherwise leave; items-start keeps
+          each panel at its own content height instead of stretching it to the tallest panel in its row. */}
+      <div className="grid grid-flow-row-dense grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <Suspense key={`performance-${data.period.key}`} fallback={<PanelLoading id="dash-performance" title="Training performance" className="lg:col-span-2" />}>
           <PerformancePanel analytics={analytics} className="lg:col-span-2" />
         </Suspense>
         <Suspense key={`health-${data.period.key}`} fallback={<PanelLoading id="dash-health" title="Training health" />}>
           <TrainingHealthPanel analytics={analytics} />
         </Suspense>
-      </div>
-      <p role="note" className="-mt-3 text-2xs text-ink-faint">
-        {ATTENDANCE_DEFINITION_NOTE}
-      </p>
-      <div className="grid grid-cols-1 gap-4">
-        <Suspense key={`batches-${data.period.key}`} fallback={<PanelLoading id="dash-batches" title="Batch comparison" />}>
-          <BatchComparisonPanel analytics={analytics} />
+        <Suspense key={`batches-${data.period.key}`} fallback={<PanelLoading id="dash-batches" title="Batch comparison" className="lg:col-span-2" />}>
+          <BatchComparisonPanel analytics={analytics} className="lg:col-span-2" />
         </Suspense>
-        <Suspense key={`courses-${data.period.key}`} fallback={<PanelLoading id="dash-courses" title="Course comparison" />}>
-          <CourseComparisonPanel analytics={analytics} />
-        </Suspense>
-      </div>
-      <Suspense key={`students-${data.period.key}`} fallback={<PanelLoading id="dash-students" title="Student Performance (Top 5)" />}>
-        <StudentPerformancePanel analytics={analytics} />
-      </Suspense>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        <Overview section={data.overview} />
         <Suspense key={`progress-${data.period.key}`} fallback={<PanelLoading id="dash-progress" title="Course Progress" />}>
           <CourseProgressPanel analytics={analytics} />
+        </Suspense>
+        <Suspense key={`courses-${data.period.key}`} fallback={<PanelLoading id="dash-courses" title="Course comparison" className="lg:col-span-2" />}>
+          <CourseComparisonPanel analytics={analytics} className="lg:col-span-2" />
+        </Suspense>
+        <Suspense key={`students-${data.period.key}`} fallback={<PanelLoading id="dash-students" title="Student Performance (Top 5)" />}>
+          <StudentPerformancePanel analytics={analytics} />
         </Suspense>
         <Suspense key={`topics-${data.period.key}`} fallback={<PanelLoading id="dash-topics" title="Weak Topics" />}>
           <WeakTopicsPanel analytics={analytics} />
         </Suspense>
+        <Overview section={data.overview} />
+        <QuickActions />
         <TodayClasses section={data.todayClasses} today={data.today} />
-      </div>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
         <UpcomingClasses section={data.upcomingClasses} />
         <UpcomingTests section={data.upcomingTests} />
         <Activity section={data.activity} />
-      </div>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        <QuickActions />
-        <div className="lg:col-span-1 xl:col-span-2">
-          <PendingApprovalsPanel section={data.approvals} />
-        </div>
+        <PendingApprovalsPanel section={data.approvals} className="lg:col-span-2" />
       </div>
     </div>
   );
@@ -1017,27 +1173,25 @@ export function AdminDashboard({ data, analytics }: { data: AdminDashboardData; 
 /** Loading placeholder with the dashboard's shape (used as the page's Suspense fallback). */
 export function AdminDashboardSkeleton() {
   return (
-    <div className="flex flex-col gap-6" aria-busy="true" aria-live="polite">
+    <div className="flex flex-col gap-5" aria-busy="true" aria-live="polite">
       <span className="sr-only">Loading the dashboard…</span>
       <div>
         <Skeleton className="h-8 w-48" />
         <Skeleton className="mt-2 h-4 w-80 max-w-full" />
+        <Skeleton className="mt-3 h-8 w-96 max-w-full" />
       </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+      <Skeleton className="h-24" />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
         {Array.from({ length: 6 }).map((_, i) => (
           <Skeleton key={i} className="h-24" />
         ))}
       </div>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Skeleton key={i} className="h-64" />
-        ))}
+        <Skeleton className="h-72 lg:col-span-2" />
+        <Skeleton className="h-72" />
+        <Skeleton className="h-56 lg:col-span-2" />
+        <Skeleton className="h-56" />
       </div>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        <Skeleton className="h-64 lg:col-span-2" />
-        <Skeleton className="h-64" />
-      </div>
-      <Skeleton className="h-40" />
     </div>
   );
 }

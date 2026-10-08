@@ -115,8 +115,10 @@ test("header: the approved title and subtitle; a real period selector (server li
   const view = strip(src(VIEW));
   assert.match(view, /export const DASHBOARD_TITLE = "Training Intelligence & Operations";/);
   assert.match(view, /export const DASHBOARD_SUBTITLE = "Track performance, manage operations, and ensure successful training outcomes\.";/);
-  assert.match(view, /<PageHeader title=\{DASHBOARD_TITLE\} description=\{DASHBOARD_SUBTITLE\} actions=\{<PeriodSelector period=\{data\.period\} today=\{data\.today\} \/>\} \/>/);
-  assert.match(view, /<nav aria-label="Reporting period">/);
+  // D2b-2F: the selector sits beside / under the title in the dashboard's own row (it was clipped inside PageHeader's shrink-0 actions slot)
+  assert.match(view, /<PageHeader title=\{DASHBOARD_TITLE\} description=\{DASHBOARD_SUBTITLE\} className="min-w-0 pb-0" \/>\s*<PeriodSelector period=\{data\.period\} today=\{data\.today\} \/>/);
+  assert.doesNotMatch(view, /actions=\{<PeriodSelector/);
+  assert.match(view, /<nav aria-label="Reporting period" className="max-w-full">/);
   assert.match(view, /\{PERIOD_KEYS\.map\(\(key\) => \{/, "exactly the four supported periods");
   assert.match(view, /href=\{`\/admin\?period=\$\{key\}`\}/, "server links; no client state");
   assert.match(view, /aria-current=\{selected \? "page" : undefined\}/);
@@ -132,19 +134,19 @@ test("performance summary and weak topics: management-level, period-based, never
   assert.match(view, /title="Training performance"/);
   assert.match(view, /action=\{\{ href: "\/admin\/performance", label: "View detailed performance" \}\}/, "the detail stays on the existing Performance page");
   assert.match(view, /\{panels\.data\.performance\.map\(\(m\) =>/, "the four summary figures");
-  assert.match(view, /if \(c\.state === "no_comparison"\) return <span className="text-ink-faint">No comparison data<\/span>;/);
+  assert.match(view, /if \(c\.state === "no_comparison"\) return <span className="text-ink-faint">No comparison<\/span>;/, "D2b-2F cleanup: short on-screen wording");
   assert.match(view, /title="No activity in this period"/);
   assert.doesNotMatch(view, /strongModules|weakModules|studentResults|Stronger modules|Weaker modules|filters\.batches|PerformanceFilters|PerformanceView/, "no module / student / batch detail");
   assert.match(view, /title="Weak Topics"/);
   assert.match(view, /title="Insufficient data"/);
-  assert.match(view, /released results: n = \$\{panels\.data\.resultsInPeriod\}/);
+  assert.match(view, /<Compact title="Not enough data yet" description="Not enough graded answers this period\." \/>/, "D2b-2F cleanup: compact Weak Topics no-data state (the rule — 5 graded answers per module — is unchanged in the read model)");
   assert.doesNotMatch(view + strip(src(ANALYTICS)), /"Weak"|"Developing"|"Strong"|"developing"/, "one vocabulary: Healthy / Watch / Attention");
 });
 
 test("training health: six lines, each with its reason; overall worst line wins with 'Based on X of 6'; never a numeric score", () => {
   const view = strip(src(VIEW));
   assert.match(view, /<Badge tone=\{HEALTH_TONE\[h\.status\]\}>\{HEALTH_LABEL\[h\.status\]\}<\/Badge>/, "health status as text");
-  assert.match(view, /<p className="mt-1 text-xs text-ink-muted">\{h\.reason\}<\/p>/, "every status shows its reason");
+  assert.match(view, /<p className="mt-0\.5 pl-4 text-xs text-ink-muted">\{healthReason\(h\)\}<\/p>/, "every status shows its reason (D2b-2F cleanup: in short form)");
   assert.match(view, /Overall: \{health\.data\.overall\.status === "no_data" \? "No data" : HEALTH_LABEL\[health\.data\.overall\.status\]\}/);
   assert.match(view, /Based on \{health\.data\.overall\.basedOn\} of \{health\.data\.overall\.total\} indicators/);
   assert.match(view, /no_data: "neutral", unavailable: "neutral"/, "No data / Unavailable are neutral, not failures");
@@ -158,8 +160,8 @@ test("streaming and isolation: each analytics panel has its own Suspense boundar
     assert.match(view, new RegExp(`<Suspense key=\\{\`${key}-\\$\\{data\\.period\\.key\\}\`\\} fallback=\\{<PanelLoading `), `${panel}: own fallback, re-shown when the period changes`);
     assert.match(view, new RegExp(`async function ${panel}\\(`), `${panel} awaits the analytics promise itself`);
   }
-  assert.match(view, /title="Advanced analytics are temporarily unavailable\."/, "fixed message — no SQL or stack detail");
-  for (const s of ["<Metrics section={data.metrics} />", "<Attention section={data.attention} />", "<Overview section={data.overview} />", "<TodayClasses section={data.todayClasses}", "<PendingApprovalsPanel section={data.approvals} />"]) {
+  assert.match(view, /function AnalyticsUnavailable\(\) \{\s*return <SectionError \/>;/, "fixed message — no SQL or stack detail (audit: the same compact section error)");
+  for (const s of ["<Metrics section={data.metrics} />", "<Attention section={data.attention} />", "<Overview section={data.overview} />", "<TodayClasses section={data.todayClasses}", "<PendingApprovalsPanel section={data.approvals}"]) {
     assert.ok(view.includes(s), `${s} renders from the current-state half`);
   }
 });
@@ -167,14 +169,14 @@ test("streaming and isolation: each analytics panel has its own Suspense boundar
 test("sections: empty and error states; attention hidden when nothing needs attention; responsive grids; reading order", () => {
   const view = strip(src(VIEW));
   assert.match(view, /if \(section\.status === "ok" && section\.data\.length === 0\) return null;/);
-  assert.match(view, /title="This section couldn't be loaded"/);
+  assert.match(view, /<p className="text-sm font-medium text-ink">Unable to load this section\.<\/p>\s*<p className="text-xs text-ink-muted">Refresh to retry\.<\/p>/);
   for (const t of ["No classes today", "No upcoming classes", "No upcoming tests", "No recent activity"]) assert.ok(view.includes(t), t);
-  assert.match(view, /grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6/, "2 / 3 / 4 / 6 metrics per row");
-  assert.match(view, /grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-3/, "1 / 2 / 3 content columns");
-  const order = ["<Metrics", "<Attention", "<PerformancePanel", "<TrainingHealthPanel", "<BatchComparisonPanel", "<CourseComparisonPanel", "<StudentPerformancePanel", "<Overview", "<CourseProgressPanel", "<WeakTopicsPanel", "<TodayClasses", "<UpcomingClasses", "<UpcomingTests", "<Activity", "<QuickActions", "<PendingApprovalsPanel"];
+  assert.match(view, /grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6/, "2 / 3 / 6 metrics per row (D2b-2F: wide enough for full labels)");
+  assert.match(view, /grid grid-flow-row-dense grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3/, "1 / 2 / 3 content columns; each panel keeps its own content height (QA fix #2/#3)");
+  const order = ["<Attention", "<Metrics", "<PerformancePanel", "<TrainingHealthPanel", "<BatchComparisonPanel", "<CourseProgressPanel", "<CourseComparisonPanel", "<StudentPerformancePanel", "<WeakTopicsPanel", "<Overview", "<QuickActions", "<TodayClasses", "<UpcomingClasses", "<UpcomingTests", "<Activity", "<PendingApprovalsPanel"];
   const positions = order.map((s) => view.lastIndexOf(s));
   assert.ok(positions.every((p) => p >= 0));
-  assert.deepEqual([...positions].sort((a, b) => a - b), positions, "attention right after the metrics; reading order matches the layout");
+  assert.deepEqual([...positions].sort((a, b) => a - b), positions, "D2b-2F rows: Attention, KPIs, performance + health, batches + progress, courses + students, topics + overview + actions, classes + tests, activity + approvals");
 });
 
 test("quick actions and links: only existing /admin routes, no new mutation workflows", () => {
@@ -260,27 +262,48 @@ test("batch and course comparison (D2b-2B): from the one analytics response, nam
     assert.match(p, /panels\.status === "error" \? \(\s*<AnalyticsUnavailable \/>/, "the existing unavailable state");
     assert.doesNotMatch(p, /Badge|BAND_TONE|HEALTH_LABEL|TOPIC_BAND_LABEL|Healthy|Watch|Attention/, "no status bands on batches / courses");
     assert.doesNotMatch(p, /\.sort\(|\.reverse\(/, "rows are never re-ordered");
-    assert.doesNotMatch(p, /overflow-x|min-w-\[|whitespace-nowrap|<table|<Table/, "no wide table: cards that wrap at 400 px");
+    // D2b-2F: a compact table from md; below md each row stacks into label / value pairs — never a scrolling wide table
+    assert.match(p, /<table className=\{CMP_TABLE\}>/);
+    assert.match(p, /<thead className="hidden border-b border-surface-border bg-surface-sunken min-\[900px\]:table-header-group">/);
+    assert.doesNotMatch(p, /overflow-x|min-w-\[|whitespace-nowrap|<Table\b/, "no wide or scrolling table");
   }
   assert.match(batches, /title="No batch activity in this period"/);
   assert.match(courses, /title="No course activity in this period"/);
-  assert.match(batches, /<dt className="text-2xs text-ink-muted">Completion \(current\)<\/dt>/, "completion is labelled a current figure");
-  assert.match(batches, /of enrolments now, not this period/);
+  assert.match(batches, /<th scope="col" className=\{`\$\{CMP_HEAD\} text-right`\}>Completion \(current\)<\/th>/, "completion is labelled a current figure");
+  assert.match(batches, /<td data-label="Completion \(current\)" className=\{CMP_FIGURE\}>/);
+  assert.match(batches, /Completion \(current\) is of enrolments now, not this period\./);
   assert.match(batches, /<Link href=\{b\.href\}/);
   assert.match(batches, /<Link href=\{b\.performanceHref\}[\s\S]*?View performance<span className="sr-only"> of \{b\.name\}<\/span>/, "descriptive per-row link");
   assert.match(courses, /<Link href=\{c\.href\}/);
-  assert.match(batches, /listed by name/);
-  assert.match(courses, /listed by title/);
+  assert.match(batches, /description=\{panels\.status === "ok" \? periodShort\(panels\.data\.period\) : undefined\}/, "audit: the exact dates are shown once, in the header");
+  assert.match(courses, /description=\{panels\.status === "ok" \? periodShort\(panels\.data\.period\) : undefined\}/);
+  assert.match(view, /<p className="mt-2 text-2xs text-ink-faint">\{text\} · listed by \{order\}<\/p>/, "the order is still stated when a list is cut");
   assert.match(view, /<ShownText text=\{panels\.data\.batches\.shownText\} order="name" \/>/);
   assert.match(view, /<ShownText text=\{panels\.data\.courses\.shownText\} order="title" \/>/);
-  // responsive: 2 figures per row on a phone, more as the width allows
-  assert.match(batches, /grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-5/);
-  assert.match(courses, /grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4/);
-  assert.match(view, /<div className="grid grid-cols-1 gap-4">\s*<Suspense key=\{`batches-/);
+  // responsive: stacked label / value pairs below 900px (labels from data-label), table cells from 900px (QA fix #1:
+  // at 768–860 the sidebar leaves a ~450–540px panel, narrower than the six-column batch table)
+  assert.match(view, /const CMP_FIGURE =\s*"flex items-baseline justify-between gap-3 py-0\.5 before:text-2xs before:text-ink-muted before:content-\[attr\(data-label\)\] min-\[900px\]:table-cell/);
+  for (const c of ["CMP_TABLE", "CMP_ROW", "CMP_NAME", "CMP_FIGURE"]) {
+    const def = view.slice(view.indexOf(`const ${c} =`), view.indexOf(";", view.indexOf(`const ${c} =`)));
+    assert.match(def, /min-\[900px\]:/, `${c} switches at 900px`);
+    assert.doesNotMatch(def, /\b(sm|md|lg):/, `${c}: no earlier table breakpoint`);
+  }
+  for (const [p, labels] of [[batches, ["Test average", "Pass rate", "Attendance", "Assignment average"]], [courses, ["Test average", "Pass rate", "Attendance", "Assignment average"]]]) {
+    assert.deepEqual([...p.matchAll(/<FigureCell label="([^"]+)"/g)].map((m) => m[1]), labels, "the same four figures, same order");
+  }
+  // D2b-2F cleanup: insufficient data shows "—" on screen; the read model's wording and the record count are read out
+  assert.match(view, /<span aria-hidden="true">—<\/span>\s*<span className="sr-only">Insufficient data, \{countText\(figure\.evidence, noun\)\}<\/span>/, "audit: the count once, correct plural");
+  assert.match(view, /<span className="block font-mono text-sm font-semibold text-ink">\{figure\.display\}<\/span>\s*<span className="sr-only">\{countText\(figure\.evidence, noun\)\}<\/span>/, "real values unchanged, from the read model");
+  assert.match(batches, /<FigureCell label="Test average" figure=\{b\.testAvg\} noun="released results" change=\{b\.testAvgChange\} \/>/);
+  assert.match(batches, /<FigureCell label="Attendance" figure=\{b\.attendance\} noun="attendance records" change=\{b\.attendanceChange\} \/>/);
+  assert.match(courses, /<FigureCell label="Test average" figure=\{c\.testAvg\} noun="released results" change=\{c\.testAvgChange\} \/>/);
+  // Step B: both comparison panels sit in the one analytics grid, two columns wide from lg
+  assert.match(view, /<Suspense key=\{`batches-\$\{data\.period\.key\}`\} fallback=\{<PanelLoading id="dash-batches" title="Batch comparison" className="lg:col-span-2" \/>\}>\s*<BatchComparisonPanel analytics=\{analytics\} className="lg:col-span-2" \/>/);
+  assert.match(view, /<Suspense key=\{`courses-\$\{data\.period\.key\}`\} fallback=\{<PanelLoading id="dash-courses" title="Course comparison" className="lg:col-span-2" \/>\}>\s*<CourseComparisonPanel analytics=\{analytics\} className="lg:col-span-2" \/>/);
   // wording comes from the read model: insufficient evidence and missing comparisons are explicit
   assert.match(lib, /`Insufficient data \(\$\{evidence\}\)`/);
   assert.match(lib, /comparison\.state === "change" \? formatPoints\(comparison\) : "No comparison data"/);
-  assert.match(view, /if \(change\.comparison\.state !== "change"\) return <span className="text-ink-faint">No comparison data<\/span>;/);
+  assert.match(view, /if \(change\.comparison\.state !== "change"\) return <span className="sr-only">No comparison data<\/span>;/, "still explicit (never 0 pp), but read out instead of printed in every cell");
   assert.match(lib, /shownText: total > rows\.length \? `Showing \$\{rows\.length\} of \$\{total\}` : null/);
   assert.doesNotMatch(lib.slice(lib.indexOf("export function batchComparison"), lib.indexOf("const hasAny")), /\.sort\(/, "no ranking in the read model");
   // D2b-2D not built (student results are D2b-2C, tested below)
@@ -292,21 +315,28 @@ test("Student Performance (Top 5) (D2b-2C): students.current (0027) in database 
   const lib = strip(src(ANALYTICS));
   const panel = view.slice(view.indexOf("const TREND_ARROW ="), view.indexOf("function ChangeText("));
   assert.ok(panel.includes("async function StudentPerformancePanel("), "the panel is inside the D2b-2C section");
-  assert.match(panel, /title="Student Performance \(Top 5\)" description="By average score" action=\{\{ href: "\/admin\/performance", label: "View detailed performance" \}\}/, "exact title, subtitle and the existing Performance page link");
+  assert.match(panel, /title="Student Performance \(Top 5\)" action=\{\{ href: "\/admin\/performance", label: "View detailed performance" \}\}/, "exact title, subtitle and the existing Performance page link");
   assert.match(panel, /const \{ panels \} = await analytics;/, "the shared analytics promise — no further call");
   assert.match(panel, /panels\.status === "error" \? \(\s*<AnalyticsUnavailable \/>/, "the existing unavailable state");
   assert.match(view, /<Suspense key=\{`students-\$\{data\.period\.key\}`\} fallback=\{<PanelLoading id="dash-students" title="Student Performance \(Top 5\)" \/>\}>\s*<StudentPerformancePanel analytics=\{analytics\} \/>/, "keyed Suspense, same place");
   // exactly four columns, in order
-  const heads = [...panel.matchAll(/<th scope="col" className=\{.*?\}>([^<]+)<\/th>/g)].map((m) => m[1]);
-  assert.deepEqual(heads, ["#", "Student Name", "Test Avg", "Trend"]);
+  const heads = [...panel.matchAll(/<th scope="col" className=\{.*?\}>\s*([^<]+?)\s*(?:<span|<\/th>)/g)].map((m) => m[1]);
+  assert.deepEqual(heads, ["Rank", "Student", "Average score", "Trend"], "D2b-2F header wording");
+  assert.match(panel, /Average score<span className="sm:hidden lg:inline"> \/ Trend<\/span>/, "where the trend is stacked, the header says so");
   assert.equal((panel.match(/<col\b/g) ?? []).length, 4);
   assert.match(panel, /<caption className="sr-only">Student Performance \(Top 5\), by average score<\/caption>/);
   // rows: database order and rank, name with the code beneath, one-decimal average, trend cell
   assert.match(panel, /\{panels\.data\.students\.rows\.map\(\(s\) =>/);
   assert.match(panel, /font-semibold text-ink">\{s\.rank\}<\/span>/, "the database rank number");
-  assert.match(panel, /<span className="block break-words font-medium text-ink">\{s\.name\}<\/span>\s*\{s\.code && <span className="block break-all font-mono text-2xs text-ink-faint">\{s\.code\}<\/span>\}/);
-  assert.match(panel, /\{s\.averageDisplay\}<\/td>/);
-  assert.match(panel, /<TrendCell row=\{s\} \/>/);
+  assert.match(panel, /<span className="block break-words font-medium text-ink">\{s\.name\}<\/span>\s*\{s\.code && <span className="block break-words font-mono text-2xs text-ink-faint">\{s\.code\}<\/span>\}/, "QA fix #5: the code breaks only if it cannot fit, never mid-identifier by default");
+  // QA fix #5: the panel is one narrow grid column below sm and from lg — the trend sits under the average there;
+  // the separate Trend column shows only where the panel is wide (sm–lg). Exactly one of the two is displayed.
+  assert.match(panel, /const SP_TREND_COLUMN = "hidden sm:table-cell lg:hidden";/);
+  assert.match(panel, /const SP_TREND_STACKED = "mt-0\.5 block font-sans font-normal sm:hidden lg:block";/);
+  assert.match(panel, /\{s\.averageDisplay\}\s*<span className=\{SP_TREND_STACKED\}>\s*<TrendCell row=\{s\} \/>\s*<\/span>\s*<\/td>/);
+  assert.match(panel, /<td className=\{`px-2 py-2 text-right align-top \$\{SP_TREND_COLUMN\}`\}>\s*<TrendCell row=\{s\} \/>/);
+  assert.match(panel, /<th scope="col" className=\{`\$\{SP_HEAD\} text-right \$\{SP_TREND_COLUMN\}`\}>Trend<\/th>/);
+  assert.equal((panel.match(/<TrendCell row=\{s\} \/>/g) ?? []).length, 2);
   // trend: arrow (decorative) + text label (screen readers) + the pp value — never colour alone; null → "No comparison"
   assert.match(panel, /const TREND_ARROW = \{ up: "↑", down: "↓", neutral: "→", none: "" \} as const;/);
   assert.match(panel, /<span aria-hidden="true">\{TREND_ARROW\[row\.trendDirection\]\}<\/span>\s*<span className="sr-only">\{row\.directionLabel\}:<\/span>\s*<span>\{row\.trendDisplay\}<\/span>/);
@@ -315,8 +345,9 @@ test("Student Performance (Top 5) (D2b-2C): students.current (0027) in database 
   assert.match(lib, /if \(points >= TREND_THRESHOLD_PP\) return "up";\s*if \(points <= -TREND_THRESHOLD_PP\) return "down";\s*return "neutral";/, "±1 pp thresholds, inclusive");
   assert.match(lib, /up: "Up", down: "Down", neutral: "No meaningful change", none: "No comparison"/);
   // empty state and caption
-  assert.match(panel, /panels\.data\.students\.insufficient \? \(\s*<Compact title="Insufficient data" description="No student has 3 or more released results in the last 366 days" \/>/);
-  assert.match(panel, /<p className="mt-3 text-2xs text-ink-faint">\{panels\.data\.students\.caption\}<\/p>/);
+  assert.match(panel, /panels\.data\.students\.insufficient \? \(\s*<Compact title="Insufficient data" description="Needs 3\+ released results per student \(last 366 days\)" \/>/, "the rule stays visible: it explains the empty panel");
+  assert.match(panel, /<p className="mt-3 text-2xs text-ink-faint">\{STUDENT_CAPTION\}<\/p>/);
+  assert.match(panel, /const STUDENT_CAPTION = "Ranked over the last 366 days · trend vs previous period";/, "audit: shorter caption, same ranking window and trend basis");
   assert.match(lib, /caption: `Current ranking: last 366 days · trend: \$\{periodLabel\} vs previous`/);
   // the current ranking comes from students.current only — never substituted from the period-based lists
   assert.match(lib, /students: studentPerformance\(raw\.students\.current, raw\.students\.current_window, PERIOD_LABEL\[key\]\)/);
@@ -327,7 +358,7 @@ test("Student Performance (Top 5) (D2b-2C): students.current (0027) in database 
   assert.doesNotMatch(panel, /at-risk|at risk|follow-up|intervention|Badge|HEALTH_LABEL/i);
   // responsive (~400 px): a fixed-layout table that fits — wrapping names, narrow fixed columns, no horizontal overflow
   assert.match(panel, /<table className="w-full table-fixed border-collapse text-sm">/);
-  assert.match(panel, /<col className="w-9" \/>\s*<col \/>\s*<col className="w-20" \/>\s*<col className="w-28" \/>/, "≈ 228 px of fixed columns; the name column takes the rest");
+  assert.match(panel, /<col className="w-12" \/>\s*<col \/>\s*<col className="w-28 sm:w-24 lg:w-28" \/>\s*<col className="w-0 sm:w-28 lg:w-0" \/>/, "narrow panel: 48 + 112 px fixed; wide panel: 48 + 96 + 112 px; the name column takes the rest");
   assert.doesNotMatch(panel, /overflow-x|min-w-\[|w-\[|whitespace-nowrap|truncate|<Table\b/, "no wide, clipped or scrolling layout");
 });
 
@@ -339,7 +370,7 @@ test("Course Progress (D2b-2D): current-state delivery (primary) and enrolment c
   assert.match(panel, /title="Course Progress" description="Current delivery and enrolment progress" action=\{\{ href: "\/admin\/courses", label: "View all courses" \}\}/, "exact title, current-state subtitle and the courses link");
   assert.match(panel, /const \{ panels \} = await analytics;/, "the shared analytics promise — no further call");
   assert.match(panel, /panels\.status === "error" \? \(\s*<AnalyticsUnavailable \/>/, "the existing unavailable state");
-  assert.match(view, /<Suspense key=\{`progress-\$\{data\.period\.key\}`\} fallback=\{<PanelLoading id="dash-progress" title="Course Progress" \/>\}>\s*<CourseProgressPanel analytics=\{analytics\} \/>\s*<\/Suspense>\s*<Suspense key=\{`topics-/, "own keyed Suspense, in the Weak Topics row, right before Weak Topics");
+  assert.match(view, /<BatchComparisonPanel analytics=\{analytics\} className="lg:col-span-2" \/>\s*<\/Suspense>\s*<Suspense key=\{`progress-\$\{data\.period\.key\}`\} fallback=\{<PanelLoading id="dash-progress" title="Course Progress" \/>\}>\s*<CourseProgressPanel analytics=\{analytics\} \/>\s*<\/Suspense>/, "own keyed Suspense; D2b-2F: in the batch-comparison row");
   // rows from the read model (never the raw lists), one heading per course
   assert.match(panel, /\{panels\.data\.progress\.rows\.map\(\(r\) => \(\s*<CourseProgressItem key=\{r\.courseId\} row=\{r\} \/>/);
   assert.match(panel, /<h3 className="min-w-0 break-words text-sm font-medium text-ink">\{row\.course\}<\/h3>/);
@@ -378,7 +409,115 @@ test("attendance-definition note (D2b-2D): one page-level note, both definitions
   assert.match(lib, /export const ATTENDANCE_DEFINITION_NOTE =\s*"Attendance on this dashboard excludes excused absences; the Performance Tracker counts excused absences as attended\.";/);
   assert.match(view, /<p role="note" className="-mt-3 text-2xs text-ink-faint">\s*\{ATTENDANCE_DEFINITION_NOTE\}\s*<\/p>/);
   assert.equal((view.match(/\{ATTENDANCE_DEFINITION_NOTE\}/g) ?? []).length, 1);
-  assert.match(view, /<TrainingHealthPanel analytics=\{analytics\} \/>\s*<\/Suspense>\s*<\/div>\s*<p role="note"/, "right after the Training performance / Training health row");
+  assert.match(view, /<Metrics section=\{data\.metrics\} \/>\s*<p role="note"/, "Step B: directly under the KPI cards, before the analytics grid that holds Training performance / Training health");
   // the definitions themselves are untouched: the Performance Tracker still documents excused as attended
   assert.match(src("src/types/performance.ts"), /Attendance:\s+\(present \+ late \+ excused\) \/ marked records × 100\./);
+});
+
+test("Step B visual conformity: Attention cards, KPI icon tiles and panel icons are decorative additions — same data, links and states", () => {
+  const view = strip(src(VIEW));
+  // panels: an optional decorative icon tile; heading structure unchanged (section → h2)
+  assert.match(view, /function Panel\(\{ id, title, description, action, icon: Icon, children, className \}/);
+  assert.match(view, /\{Icon && \(\s*<span className="mt-0\.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary-50 text-primary-600" aria-hidden="true">/);
+  for (const [id, icon] of [["dash-performance", "LineChart"], ["dash-health", "HeartPulse"], ["dash-students", "GraduationCap"], ["dash-batches", "Layers"], ["dash-courses", "BookOpen"], ["dash-progress", "ListChecks"], ["dash-topics", "Target"], ["dash-today", "CalendarDays"], ["dash-tests", "FileCheck2"], ["dash-upcoming-classes", "CalendarClock"], ["dash-activity", "Bell"], ["dash-actions", "Zap"], ["dash-overview", "LayoutGrid"], ["dash-approvals", "Award"]]) {
+    assert.match(view, new RegExp(`<Panel\\s+id="${id}" icon=\\{${icon}\\}`), id);
+  }
+  // KPI cards: an icon tile (decorative, hidden on the narrowest screens) next to the same label / value / comparison
+  assert.match(view, /const METRIC_ICON: Record<MetricKey, \{ icon: LucideIcon; tile: string \}> = \{/);
+  assert.match(view, /<span className=\{`flex h-6 w-6 shrink-0 items-center justify-center rounded \$\{tile\}`\} aria-hidden="true">/);
+  assert.match(view, /\{cmp \? <ComparisonLine cmp=\{cmp\} \/> : m\.note && <span className="mt-1 block text-2xs text-ink-faint">\{m\.note\}<\/span>\}/, "comparisons only where they exist (no invented KPI trends)");
+  // Attention Required: one card per existing item, with its count, title, reason and link; hidden when empty
+  assert.match(view, /<ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">\s*\{section\.data\.map\(\(item\) => \(/);
+  assert.match(view, /\{item\.count\}<\/span>[\s\S]*?\{item\.title\}<\/p>[\s\S]*?\{ATTENTION_REASON\[item\.key\] \?\? item\.reason\}<\/p>[\s\S]*?<Link href=\{item\.href\}/);
+  assert.match(view, /if \(section\.status === "ok" && section\.data\.length === 0\) return null;/);
+  // one analytics / operations grid: 1 / 2 / 3 columns; wide panels span two
+  const page = view.slice(view.indexOf("export function AdminDashboard("), view.indexOf("export function AdminDashboardSkeleton("));
+  assert.equal((page.match(/<div className="grid grid-flow-row-dense grid-cols-1 items-start gap-4 lg:grid-cols-2 xl:grid-cols-3">/g) ?? []).length, 1, "one grid on the page (the skeleton mirrors it)");
+  assert.match(view, /<PendingApprovalsPanel section=\{data\.approvals\} className="lg:col-span-2" \/>/);
+  // no reference sample content was copied: no at-risk panel, no rooms, no invented KPI comparisons
+  assert.doesNotMatch(view, /At-risk|Improving Students|Room|vs last month|vs 37/i);
+});
+
+test("D2b-2F refinement: full KPI labels, small empty states, compact shortcuts — presentation only, same data and links", () => {
+  const view = strip(src(VIEW));
+  const metrics = view.slice(view.indexOf("function ComparisonLine("), view.indexOf("function Attention("));
+  // KPI labels, notes and comparisons wrap — never cut off with an ellipsis
+  assert.doesNotMatch(metrics, /truncate|line-clamp|whitespace-nowrap/, "no clipped KPI text");
+  assert.match(metrics, /<span className="min-w-0 pt-0\.5 text-xs font-medium leading-tight text-ink-muted">\{m\.label\}<\/span>/);
+  assert.match(metrics, /<span className="flex min-h-8 items-start gap-2">/, "QA fix #4: a two-line label area, so every value sits on the same line");
+  assert.match(metrics, /<span className="mt-2 block text-kpi text-ink">\{section\.data\[m\.key\]\}<\/span>/, "the value dominates");
+  // empty states: one small inline component (icon, short title, short explanation) — no large EmptyState boxes
+  assert.match(view, /function Compact\(\{ title, description \}: \{ title: string; description\?: string \}\) \{\s*return \(\s*<div className="flex items-start gap-2\.5 rounded-md bg-surface-sunken px-3 py-2\.5">/);
+  assert.doesNotMatch(view, /<EmptyState|components\/ui\/EmptyState/);
+  // Weak Topics: thresholds moved from the subtitle to a footer legend (same thresholds)
+  assert.match(view, /Healthy ≥ 80% · Watch ≥ 65% · Attention &lt; 65%/);
+  // Training health: a decorative status dot beside the label; the Badge text still carries the status
+  assert.match(view, /<span className=\{`h-2 w-2 shrink-0 rounded-full \$\{HEALTH_DOT\[h\.status\]\}`\} aria-hidden="true" \/>/);
+  // quick actions: the same seven existing routes, compact two-column shortcuts
+  assert.equal((view.match(/\{ href: "\/admin\/[^"]*", label: "[^"]+", icon: \w+ \}/g) ?? []).length, 7, "the same seven shortcuts (audit: labels only, no notes)");
+  assert.match(view, /<ul className="grid grid-cols-2 gap-2">\s*\{QUICK_ACTIONS\.map/);
+  // the analytics panels still read one shared promise and nothing new was invented
+  assert.doesNotMatch(view, /Delivery rate|Enrollment rate|Enrolment rate|At-risk|Room/i);
+});
+
+test("D2b-2F information-density cleanup: answer first, method detail off the main view — same statuses, values and links", () => {
+  const view = strip(src(VIEW));
+  const lib = strip(src(LIB)) + strip(src(ANALYTICS));
+  // Training performance: value, change in pp, one count line; "vs X% before" and the count change are read out only
+  assert.match(view, /<span className="sr-only">vs \{formatPercent\(c\.previous\)\} before<\/span>/);
+  assert.match(view, /<dd className="text-2xs text-ink-faint">\s*\{countText\(m\.evidence\.current, m\.evidenceNoun\)\}\s*<\/dd>/);
+  assert.match(view, /const countText = \(n: number, pluralNoun: string\) =>/);
+  // Training health: the status is the read model's; only the on-screen wording is shortened
+  assert.match(view, /function healthReason\(h: HealthLine\): string \{/);
+  assert.match(view, /if \(h\.status === "no_data" && HEALTH_NO_DATA_REASON\[h\.key\]\)/, "a short phrase only for 'No data' lines");
+  assert.match(view, /return h\.reason\.replace\(\/\\s\*\\\(\[\^\)\]\*\\\)\/g, ""\);/, "judged lines keep their reason minus parenthetical method detail");
+  assert.doesNotMatch(view, /Worst line wins|database fact behind it/);
+  // the rules themselves are untouched in the read model (thresholds and minimum evidence)
+  assert.match(lib, /Fewer than 5 attendance records in this period/);
+  assert.match(lib, /\(Healthy ≥ 85%, Watch ≥ 75%\)/);
+  // comparison tables: "—" plus one footer legend; no per-cell "Insufficient data (n)" / "No comparison data" / "n = …"
+  assert.match(view, /const EVIDENCE_NOTE = "— = not enough data this period\.";/);
+  assert.doesNotMatch(view, /n = \{figure\.evidence\}|released results: n =/);
+  // Weak Topics: the band legend only accompanies real bands
+  assert.match(view, /panels\.status === "ok" && panels\.data\.topics\.length > 0 && <p className="mt-3 text-2xs text-ink-faint">Healthy ≥ 80% · Watch ≥ 65% · Attention &lt; 65%<\/p>/);
+  // no fake fill-ins for missing metrics
+  assert.doesNotMatch(view, /\?\? 0\b|\|\| 0\b|"0%"/, "a missing figure is never shown as 0");
+});
+
+test("approved information-density audit: one source for dates, title-only empty states, collapsed health groups — same data, statuses and links", () => {
+  const view = strip(src(VIEW));
+  // dates: the header is the single visible source; panels say the period only; sr table captions keep the dates
+  assert.match(view, /const periodShort = \(p: AnalyticsPeriod\) => `\$\{p\.label\} vs previous period`;/);
+  assert.equal((view.match(/description=\{panels\.status === "ok" \? periodShort\(panels\.data\.period\) : undefined\}/g) ?? []).length, 3, "performance, batch and course subtitles");
+  assert.match(view, /description=\{panels\.status === "ok" \? panels\.data\.period\.label : undefined\}/, "weak topics: the period name only");
+  assert.match(view, /<caption className="sr-only">Batch comparison, \{periodText\(panels\.data\.period\)\}<\/caption>/);
+  // KPI: no notes that restate the label
+  assert.doesNotMatch(view, /In progress now|Not started yet|accounts that can sign in/);
+  // attention: one shorter reason, the read model unchanged
+  assert.match(view, /const ATTENTION_REASON: Partial<Record<AttentionItem\["key"\], string>> = \{ missing_records: "Role has no matching record\." \};/);
+  assert.match(strip(src(LIB)), /reason: "The account's role needs a matching student or trainer record\."/);
+  // training health: judged lines in full; No data / Unavailable collapse into one row each; the Unavailable message once
+  assert.match(view, /health\.data\.lines\.filter\(\(h\) => h\.status !== "no_data" && h\.status !== "unavailable"\)\.map/);
+  assert.match(view, /<HealthGroup status="no_data" lines=\{health\.data\.lines\} \/>/);
+  assert.match(view, /<HealthGroup status="unavailable" lines=\{health\.data\.lines\} note="Unable to load this section\. Refresh to retry\." \/>/);
+  assert.match(view, /<span className="font-medium">\{HEALTH_LABEL\[status\]\}:<\/span>/, "the status stays as text");
+  assert.match(view, /\{!note && <span className="sr-only"> \(\{healthReason\(h\)\.replace\(\/\\\.\$\/, ""\)\}\)<\/span>\}/, "each indicator's reason is read out");
+  assert.match(view, /students: "Not enough attendance per student\."/);
+  assert.doesNotMatch(view, /Overall status follows the weakest indicator/);
+  // empty states: the title alone where a sentence would only repeat it
+  for (const t of ["No classes today", "No upcoming classes", "No upcoming tests", "Nothing awaiting approval"]) assert.match(view, new RegExp(`<Compact title="${t}" \\/>`), t);
+  assert.match(view, /<Compact title="No recent activity" description="Your notifications appear here\." \/>/);
+  assert.equal((view.match(/description="No results, attendance or assignments this period\."/g) ?? []).length, 2);
+  // subtitles
+  assert.match(view, /description="Open or opening soon"/);
+  assert.match(view, /description="Trainer completion recommendations"/);
+  assert.match(view, /<Panel id="dash-overview" icon=\{LayoutGrid\} title="Training overview" description="Batches by status">/, "no duplicate 'View all batches'");
+  // batch rows: the code only when it differs from the name; concise screen-reader figures
+  assert.match(view, /\{b\.code !== b\.name && \(/);
+  assert.match(view, /<span className="sr-only">Insufficient data, \{countText\(figure\.evidence, noun\)\}<\/span>/);
+  // weak topics: answer counts are read out, not shown
+  assert.match(view, /<span className="sr-only">\{countText\(t\.answers, "graded answers"\)\}<\/span>/);
+  // untouched: Course Progress wording (D2b-2D) and the attendance definition
+  assert.match(view, /Current state — not affected by the reporting period\./);
+  assert.match(view, /title="Course Progress" description="Current delivery and enrolment progress"/);
 });
