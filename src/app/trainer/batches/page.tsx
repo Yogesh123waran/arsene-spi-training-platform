@@ -24,7 +24,7 @@ export default async function TrainerBatchesPage() {
       {loadError ? (
         <ErrorState title="We couldn't load your batches" description={loadError} />
       ) : (
-        <BatchesTable rows={batches} />
+        <BatchesTable rows={batches} trainerDetail />
       )}
     </div>
   );

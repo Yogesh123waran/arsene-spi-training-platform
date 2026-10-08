@@ -15,8 +15,9 @@ import type { BatchEnrollmentDetail, EnrollmentStatus } from "@/lib/enrollments/
  * model: the batch header, the roster with each enrolment status, and the
  * enrolment history. This view itself never changes anything; the only
  * mutations are the client EnrollStudentDialog (slice 3A: Super Admin, new
- * enrolment, current batches only) and, per roster row, the client
- * EnrollmentStatusDialog (slice 3B: Super Admin withdraw / complete /
+ * enrolment, current batches only; P3.10-A: the same dialog in trainer mode
+ * for the trainer's own batch) and, per roster row, the client
+ * EnrollmentStatusDialog (slice 3B: Super Admin only — withdraw / complete /
  * re-enrol, as allowed by the row's server-computed actions). Students are
  * shown by name and code only (no contact data).
  */
@@ -68,13 +69,15 @@ export function BatchDetailView({ detail, backHref }: { detail: BatchEnrollmentD
           <CardTitle className="flex items-center gap-2">
             <Users className="h-4 w-4 text-ink-muted" aria-hidden /> Students
           </CardTitle>
-          {detail.mode === "admin" && detail.canEnrol && (
+          {/* P3.10-A: the trainer view gets the same dialog in trainer mode (new enrolments only). */}
+          {detail.canEnrol && (
             <EnrollStudentDialog
               batchId={batch.id}
               batchName={batch.name}
               candidates={detail.candidates.map((c) => ({ id: c.id, code: c.code, name: c.name }))}
               seatsUsed={seatsUsed}
               maxSeats={batch.maxSeats}
+              mode={detail.mode}
             />
           )}
         </CardHeader>

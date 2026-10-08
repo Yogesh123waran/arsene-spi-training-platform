@@ -47,8 +47,10 @@ test("view: a server component with no mutation code of its own (slice 3A: it on
   }
   // The view itself never mutates: no actions, handlers, buttons, forms or dialogs of its own.
   assert.doesNotMatch(view, /enrollment\.actions|onClick|<button|<form|<Button|<Modal|setEnrollment|trainerEnrol|\.from\(|\.rpc\(/i, "no mutation code in the view");
-  // Slice 3A: the only mutation entry point, Super Admin + current batch only, with name/code-only candidates.
-  assert.match(view, /\{detail\.mode === "admin" && detail\.canEnrol && \(\s*<EnrollStudentDialog/);
+  // Slice 3A / P3.10-A: the only mutation entry point, shown when the service says the caller may enrol
+  // (Super Admin, or a trainer on their own current batch); the dialog's mode is the service's mode.
+  assert.match(view, /\{detail\.canEnrol && \(\s*<EnrollStudentDialog/);
+  assert.match(view, /mode=\{detail\.mode\}/);
   assert.match(view, /candidates=\{detail\.candidates\.map\(\(c\) => \(\{ id: c\.id, code: c\.code, name: c\.name \}\)\)\}/);
   assert.equal((view.match(/<EnrollStudentDialog/g) ?? []).length, 1);
   // Slice 3B: per-row status changes, Super Admin only, driven by the row's server-computed actions.
@@ -64,11 +66,12 @@ test("view: a server component with no mutation code of its own (slice 3A: it on
   assert.match(view, /<StatusBadge status=\{r\.enrollmentStatus\} \/>/, "every enrolment status shown (withdrawn included for the Super Admin)");
 });
 
-test("View: the Super Admin batches table opens /admin/batches/<id>; the trainer table keeps the placeholder; Edit is unchanged", () => {
+test("View: the Super Admin batches table opens /admin/batches/<id>; the trainer table (P3.10-A) opens /trainer/batches/<id>; Edit is unchanged", () => {
   const table = strip(src(TABLE));
-  assert.match(table, /const detailBasePath = assignment \? "\/admin\/batches" : null;/, "only the Super Admin view (the only one given `assignment`)");
+  assert.match(table, /const detailBasePath = assignment \? "\/admin\/batches" : trainerDetail \? "\/trainer\/batches" : null;/, "the Super Admin view (given `assignment`) keeps its link; the trainer view only when the trainer page asks");
+  assert.match(src("src/app/trainer/batches/page.tsx"), /<BatchesTable rows=\{batches\} trainerDetail \/>/, "the trainer page opts in to its own detail route");
   assert.match(table, /detailBasePath \? router\.push\(`\$\{detailBasePath\}\/\$\{encodeURIComponent\(b\.id\)\}`\) : notImplemented\("View batch"\)/);
   assert.match(table, /notImplemented\("Edit batch"\)/, "Edit stays out of scope");
-  assert.doesNotMatch(src("src/app/trainer/batches/page.tsx"), /assignment=/, "the trainer page passes no assignment → no detail link yet");
+  assert.doesNotMatch(src("src/app/trainer/batches/page.tsx"), /assignment=/, "the trainer page passes no assignment → no trainer-assignment controls");
   assert.doesNotMatch(table, /enrollment\.actions|setEnrollment|trainerEnrol/, "no enrolment mutations from the table");
 });

@@ -32,12 +32,24 @@ const PAGE_SIZE = 5;
  * flags assigned trainers who are no longer available. The trainer
  * portal renders the table without it. The database decides every
  * assignment regardless of what the browser shows.
+ *
+ * `trainerDetail` (P3.10-A) is passed by the trainer page only: "View
+ * batch" opens /trainer/batches/[batchId], whose service shows only the
+ * trainer's own batches (anything else is a 404).
  */
-export function BatchesTable({ rows, assignment }: { rows: BatchSummary[]; assignment?: { trainers: AvailableTrainerOption[] } }) {
+export function BatchesTable({
+  rows,
+  assignment,
+  trainerDetail = false,
+}: {
+  rows: BatchSummary[];
+  assignment?: { trainers: AvailableTrainerOption[] };
+  trainerDetail?: boolean;
+}) {
   const router = useRouter();
-  // P3.8: the Super Admin view (the only one passed `assignment`) opens the read-only batch detail;
-  // the trainer view keeps the placeholder until the trainer detail exists.
-  const detailBasePath = assignment ? "/admin/batches" : null;
+  // P3.8: the Super Admin view (the only one passed `assignment`) opens the admin batch detail;
+  // P3.10-A: the trainer view opens the trainer batch detail.
+  const detailBasePath = assignment ? "/admin/batches" : trainerDetail ? "/trainer/batches" : null;
   const [assignTarget, setAssignTarget] = useState<AssignTrainerTarget | null>(null);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");

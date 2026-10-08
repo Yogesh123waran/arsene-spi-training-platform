@@ -28,13 +28,20 @@ test("boundary: a client component importing only React/Next navigation, icons, 
   assert.doesNotMatch(code, /\.(insert|update|upsert|delete)\(/);
 });
 
-test("mutation: only setEnrollmentAction(batchId, student.id, \"enrolled\", reason) — no withdraw / complete / re-enrol / trainer action", () => {
+test("mutation: admin mode only setEnrollmentAction(batchId, student.id, \"enrolled\", reason); trainer mode (P3.10-A) only trainerEnrolStudentAction(batchId, student.id) — no withdraw / complete / re-enrol", () => {
   const code = strip(src(DIALOG));
-  assert.equal((code.match(/setEnrollmentAction\(/g) ?? []).length, 1, "exactly one call");
+  assert.equal((code.match(/setEnrollmentAction\(/g) ?? []).length, 1, "exactly one admin call");
   const calls = [...code.matchAll(/await setEnrollmentAction\(([\s\S]*?)\)\.catch\(/g)].map((m) => m[1].replace(/\s+/g, " ").trim());
   assert.deepEqual(calls, [`batchId, student.id, "enrolled", reason.trim() || null`]);
-  assert.doesNotMatch(code, /"withdrawn"|"completed"|trainerEnrolStudentAction|reEnrol|bulk/);
-  assert.match(code, /\.catch\(\(\) => \(\{\s*ok: false as const,\s*error: ENROLLMENT_GENERIC_ERROR,\s*\}\)\)/, "a thrown action becomes the generic sentence");
+  assert.equal((code.match(/trainerEnrolStudentAction\(/g) ?? []).length, 1, "exactly one trainer call");
+  assert.match(code, /await trainerEnrolStudentAction\(batchId, student\.id\)\.catch\(failed\)/, "trainer: ids only — no status, no reason");
+  assert.match(code, /const trainer = mode === "trainer";/);
+  assert.match(code, /mode = "admin",/, "admin is the default — existing callers are unchanged");
+  assert.match(code, /const result = trainer\s*\? await trainerEnrolStudentAction/, "the mode alone picks the action");
+  assert.doesNotMatch(code, /"withdrawn"|"completed"|reEnrol|bulk/);
+  assert.match(code, /const failed = \(\) => \(\{ ok: false as const, error: ENROLLMENT_GENERIC_ERROR \}\);/, "a thrown action becomes the generic sentence");
+  assert.equal((code.match(/\.catch\(failed\)/g) ?? []).length, 2, "both actions");
+  assert.match(code, /\{!trainer && \(\s*<label/, "the reason field is admin-only (the trainer function takes none)");
   assert.match(code, /setError\(result\.error\)/, "failure: the server's fixed sentence only");
 });
 

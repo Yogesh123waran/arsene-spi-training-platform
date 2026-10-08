@@ -8,20 +8,24 @@ import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { useToast } from "@/components/ui/Toast";
-import { setEnrollmentAction } from "@/services/enrollment.actions";
+import { setEnrollmentAction, trainerEnrolStudentAction } from "@/services/enrollment.actions";
 import { ENROLLMENT_GENERIC_ERROR, REASON_MAX_LENGTH, isUuid, type EnrollmentCandidate } from "@/lib/enrollments/enrollment";
 
 const textareaClass = "rounded border border-surface-border bg-white px-3 py-2 text-sm text-ink focus:border-signal-blue";
 
 /**
- * "+ Enrol student" on the Super Admin batch detail (P3.8 slice 3A).
- * Offers the server-built candidates (active student record, student
- * role, active account, not yet in this batch) by name and code only;
- * one student per enrolment; optional reason. The enrolment itself goes
- * through setEnrollmentAction → admin_set_enrollment(), which decides
- * availability, capacity, batch state and authorization; its answer is
- * shown as a fixed sentence. Re-enrolment, withdrawal and completion are
- * not offered here.
+ * "+ Enrol student" on the batch detail. Offers the server-built
+ * candidates by name and code only; one student per enrolment. The
+ * database decides availability, capacity, duplicates, batch state and
+ * authorization; its answer is shown as a fixed sentence. Re-enrolment,
+ * withdrawal and completion are never offered here.
+ *
+ *   mode "admin"   (P3.8 slice 3A) — Super Admin: any available student
+ *                  not yet in the batch; optional reason;
+ *                  setEnrollmentAction → admin_set_enrollment().
+ *   mode "trainer" (P3.10-A) — the trainer's own current students (the
+ *                  service's candidates); no reason (the function takes
+ *                  none); trainerEnrolStudentAction → trainer_enroll_student().
  */
 export function EnrollStudentDialog({
   batchId,
@@ -29,13 +33,16 @@ export function EnrollStudentDialog({
   candidates,
   seatsUsed,
   maxSeats,
+  mode = "admin",
 }: {
   batchId: string;
   batchName: string;
   candidates: EnrollmentCandidate[];
   seatsUsed: number;
   maxSeats: number;
+  mode?: "admin" | "trainer";
 }) {
+  const trainer = mode === "trainer";
   const router = useRouter();
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
@@ -74,10 +81,10 @@ export function EnrollStudentDialog({
     setError(undefined);
     const student = selected;
     startTransition(async () => {
-      const result = await setEnrollmentAction(batchId, student.id, "enrolled", reason.trim() || null).catch(() => ({
-        ok: false as const,
-        error: ENROLLMENT_GENERIC_ERROR,
-      }));
+      const failed = () => ({ ok: false as const, error: ENROLLMENT_GENERIC_ERROR });
+      const result = trainer
+        ? await trainerEnrolStudentAction(batchId, student.id).catch(failed)
+        : await setEnrollmentAction(batchId, student.id, "enrolled", reason.trim() || null).catch(failed);
       if (!result.ok) {
         setError(result.error);
         return;
@@ -119,7 +126,14 @@ export function EnrollStudentDialog({
           )}
 
           {candidates.length === 0 ? (
-            <EmptyState title="No students available" description="No active students are available to enrol (students already in this batch are not listed)." />
+            <EmptyState
+              title="No students available"
+              description={
+                trainer
+                  ? "Only active students already enrolled in another batch you currently teach can be added here. New students join through an invitation."
+                  : "No active students are available to enrol (students already in this batch are not listed)."
+              }
+            />
           ) : (
             <>
               <div className="relative">
@@ -164,17 +178,19 @@ export function EnrollStudentDialog({
                 </ul>
               )}
 
-              <label className="flex flex-col gap-1.5">
-                <span className="text-sm font-medium text-ink">Reason (optional, kept in the enrolment history)</span>
-                <textarea
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  rows={2}
-                  maxLength={REASON_MAX_LENGTH}
-                  disabled={isPending}
-                  className={textareaClass}
-                />
-              </label>
+              {!trainer && (
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium text-ink">Reason (optional, kept in the enrolment history)</span>
+                  <textarea
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    rows={2}
+                    maxLength={REASON_MAX_LENGTH}
+                    disabled={isPending}
+                    className={textareaClass}
+                  />
+                </label>
+              )}
 
               <p className="text-xs text-ink-muted">
                 {seatsUsed} of {maxSeats} seats used. The enrolment is checked again when you submit (availability, seats and batch status).
