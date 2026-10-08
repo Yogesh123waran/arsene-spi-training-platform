@@ -44,16 +44,19 @@ export function Topbar({ role, onOpenMobileMenu }: TopbarProps) {
 
       <Logo variant="icon" className="h-6 shrink-0 md:hidden" />
 
-      <p className="truncate text-sm font-semibold text-ink">{title}</p>
+      {/* The title takes the space left after the right-hand group (as before); it never competes with the search. */}
+      <p className="min-w-0 flex-1 truncate text-sm font-semibold text-ink">{title}</p>
 
-      <div className="ml-auto flex items-center gap-2">
-        <div className="relative hidden sm:block">
+      {/* min-w-0 lets this group shrink below its content width: when the header is constrained (tablet widths,
+          with the sidebar shown from md) the search gives up width instead of pushing the page wider. */}
+      <div className="ml-auto flex min-w-0 items-center gap-2">
+        <div className="relative hidden w-64 min-w-0 sm:block lg:w-80">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
           <input
             type="search"
             placeholder="Search students, courses, or anything…"
             aria-label="Search"
-            className="h-10 w-64 rounded-lg border border-surface-border bg-surface pl-9 pr-3 text-sm text-ink placeholder:text-ink-faint focus:border-signal-blue lg:w-80"
+            className="h-10 w-full rounded-lg border border-surface-border bg-surface pl-9 pr-3 text-sm text-ink placeholder:text-ink-faint focus:border-signal-blue"
           />
         </div>
 
@@ -63,8 +66,12 @@ export function Topbar({ role, onOpenMobileMenu }: TopbarProps) {
           trigger={
             <button className="flex items-center gap-2 rounded-lg px-1.5 py-1 hover:bg-surface-sunken">
               <Avatar name={displayName} size="md" tone="gold" />
-              <span className="hidden flex-col items-start sm:flex">
-                <span className="text-sm leading-tight text-ink">{displayName}</span>
+              {/* An unusually long display name is capped and truncated on screen (full text stays in the DOM for the
+                  button's accessible name, and in the title) so user data cannot widen the header past the viewport. */}
+              <span className="hidden min-w-0 flex-col items-start sm:flex">
+                <span className="block max-w-[14rem] truncate text-sm leading-tight text-ink" title={displayName}>
+                  {displayName}
+                </span>
                 {user && (
                   <span className="text-2xs leading-tight text-ink-faint">{ROLE_LABEL[user.role]}</span>
                 )}
