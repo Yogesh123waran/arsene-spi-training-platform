@@ -940,6 +940,25 @@ export type UserAdminEventsRow = {
   detail: Json;
 };
 
+/** Mirrors public.user_invitation_status (0017). */
+export type UserInvitationStatusColumn = "pending" | "accepted" | "revoked" | "expired";
+
+/**
+ * public.user_invitations (0017, 0019) — the lifecycle columns the Users
+ * view reads (P3.9). Written only by the invitation functions; clients may
+ * only SELECT (Super Admin: all rows; trainer: own / current-batch). The
+ * table holds no token or secret (Supabase Auth owns those).
+ */
+export type UserInvitationsRow = {
+  id: string;
+  status: UserInvitationStatusColumn;
+  expires_at: string;
+  last_sent_at: string | null;
+  resend_count: number;
+  auth_user_id: string | null;
+  created_at: string;
+};
+
 /**
  * public.enrollment_events — append-only enrolment history (0017). Written
  * only by the batch_students trigger (source admin / trainer / invitation /
@@ -1459,6 +1478,12 @@ export type Database = {
         Update: NoClientWrites;
         Relationships: [];
       };
+      user_invitations: {
+        Row: UserInvitationsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
       enrollment_events: {
         Row: EnrollmentEventsRow;
         Insert: NoClientWrites;
@@ -1746,6 +1771,11 @@ export type Database = {
       /** 0017 (address rule widened by 0019 D1). Returns { ok, invitation_id? , reason? }. */
       create_user_invitation: {
         Args: { p: Json };
+        Returns: Json;
+      };
+      /** 0017, caller's session: revoke a pending invitation (state only; nothing deleted). Returns { ok, reason?, status? }. */
+      revoke_user_invitation: {
+        Args: { p_invitation_id: string; p_reason?: string | null };
         Returns: Json;
       };
       /** 0019, caller's session: authorize one delivery attempt. Returns { ok, email?, expires_at?, attempt?, resend_count?, reason?, retry_after_seconds? }. */

@@ -11,7 +11,13 @@
  * what the database allows.
  */
 import type { Json } from "@/lib/supabase/types";
-import type { AuthInviteFailure, InvitationCreateRefusal, InvitationDeliverRefusal, InvitationSendOutcome } from "@/types/user-management";
+import type {
+  AuthInviteFailure,
+  InvitationCreateRefusal,
+  InvitationDeliverRefusal,
+  InvitationRevokeRefusal,
+  InvitationSendOutcome,
+} from "@/types/user-management";
 import { isUuid, parseTargetRole, type ValidationResult } from "./lifecycle";
 
 /** The application route invitation links land on (implemented in P3.5). */
@@ -150,7 +156,7 @@ export const DELIVER_REASON_MESSAGE: Record<InvitationDeliverRefusal, string> = 
   expired: "This invitation has expired. Create a new invitation instead.",
   not_pending: "This invitation is no longer pending.",
   cooldown: "An invitation email was sent less than a minute ago. Wait a moment before resending.",
-  resend_limit: "This invitation has been resent the maximum number of times. Create a new invitation if needed.",
+  resend_limit: "This invitation has been resent the maximum number of times. Revoke it, then invite the address again if needed.",
   permission: "You don't have permission to do that.",
   invalid: "That invitation can't be sent.",
 };
@@ -162,6 +168,19 @@ export const DELIVERY_FAILURE_MESSAGE: Record<AuthInviteFailure, string> = {
   invalid_address: "The email service rejected this address. The invitation stays pending.",
   auth_error: "The invitation email couldn't be sent. The invitation stays pending; try resending later.",
 };
+
+/** P3.9: revoke_user_invitation refusals → safe sentences. */
+export const REVOKE_REASON_MESSAGE: Record<InvitationRevokeRefusal, string> = {
+  not_found: "That invitation no longer exists.",
+  expired: "This invitation had already expired, so there was nothing to revoke.",
+  not_pending: "This invitation is no longer pending — it was already accepted, revoked or replaced. Nothing was changed.",
+  permission: "You don't have permission to do that.",
+  invalid: "That invitation can't be revoked.",
+};
+
+/** Shown after a successful revocation: what changed, and what did not. */
+export const REVOKE_SUCCESS_MESSAGE =
+  "Invitation revoked. It can no longer be accepted; the account and its records are unchanged, and the address can be invited again.";
 
 export const GENERIC_INVITATION_ERROR = "Something went wrong. Please try again.";
 
@@ -175,6 +194,11 @@ export function asCreateRefusal(reason: string): InvitationCreateRefusal | null 
 /** A database refusal code → the known delivery reason, or null for anything unexpected (never passed through). */
 export function asDeliverRefusal(reason: string): InvitationDeliverRefusal | null {
   return hasKey(DELIVER_REASON_MESSAGE, reason) ? reason : null;
+}
+
+/** A database refusal code → the known revoke reason, or null for anything unexpected (never passed through). */
+export function asRevokeRefusal(reason: string): InvitationRevokeRefusal | null {
+  return hasKey(REVOKE_REASON_MESSAGE, reason) ? reason : null;
 }
 
 const fromMap = (map: Record<string, string>, key: string, fallback: string) =>

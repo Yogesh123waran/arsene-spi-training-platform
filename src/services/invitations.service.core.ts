@@ -26,9 +26,15 @@
  * against a local database; invitations.service.ts wires the real parts.
  */
 import type { AuthUser } from "@/types/auth";
-import type { InvitationCreateRefusal, InvitationDeliverRefusal, InvitationSendOutcome } from "@/types/user-management";
-import { asCreateRefusal, asDeliverRefusal, buildInvitationPayload, type InviteUserInput } from "@/lib/user-management/invitations";
-import { isUuid } from "@/lib/user-management/lifecycle";
+import type {
+  InvitationCreateRefusal,
+  InvitationDeliverRefusal,
+  InvitationRevokeOutcome,
+  InvitationRevokeRefusal,
+  InvitationSendOutcome,
+} from "@/types/user-management";
+import { asCreateRefusal, asDeliverRefusal, asRevokeRefusal, buildInvitationPayload, type InviteUserInput } from "@/lib/user-management/invitations";
+import { isUuid, normalizeReason } from "@/lib/user-management/lifecycle";
 import { InvitationsFunctionError, InvitationsRepositoryError, type InvitationsRepository } from "@/repositories/invitations.repository.core";
 import type { AuthAdminDelivery, AuthAdminRepository } from "@/repositories/auth-admin.repository.core";
 
@@ -183,6 +189,30 @@ export function createInvitationsService(deps: InvitationsServiceDeps) {
       const sending = openSending();
       if (!sending) return { kind: "unavailable", invitationId, reason: "not_configured" };
       return deliver(invitationId, sending);
+    },
+
+    /**
+     * Revoke a pending invitation (P3.9) on the caller's own session. revoke_user_invitation decides
+     * scope and state and writes the audit row; only the invitation's state changes — no Auth user,
+     * profile or domain record is touched, and no service-role client is opened.
+     */
+    async revokeInvitation(invitationId: unknown, reason: unknown): Promise<InvitationRevokeOutcome> {
+      await requireSuperAdmin();
+      if (deps.isDemoMode?.()) throw new InvitationsInputError("Invitation changes aren't available in demo mode.");
+      if (!isUuid(invitationId)) return { ok: false, reason: "not_found" };
+      const why = normalizeReason(reason);
+      if (!why.ok) throw new InvitationsInputError(why.error);
+      let result;
+      try {
+        result = await deps.invitations.revokeInvitation(invitationId, why.value);
+      } catch (err) {
+        const raised = raisedReason(err);
+        if (raised === "permission" || raised === "invalid") return { ok: false, reason: raised };
+        throw err;
+      }
+      if (result.ok) return { ok: true };
+      const refusal: InvitationRevokeRefusal = asRevokeRefusal(result.reason) ?? unexpectedRefusal("revoke", result.reason);
+      return { ok: false, reason: refusal };
     },
   };
 }

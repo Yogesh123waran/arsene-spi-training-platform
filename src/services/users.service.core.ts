@@ -56,6 +56,8 @@ export interface UsersServiceDeps {
   /** Demo mode has no profiles: the view is empty rather than invented. */
   isDemoMode?: () => boolean;
   pageSize?: number;
+  /** The clock used to show a pending invitation past its expiry as expired (tests inject it). */
+  now?: () => Date;
 }
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -96,10 +98,12 @@ export function createUsersService(deps: UsersServiceDeps) {
   async function loadDetail(viewer: AuthUser, userId: string): Promise<UserDetail | null> {
     const record = await deps.repository.getProfile(userId);
     if (!record) return null;
-    const audit = await deps.repository.listAuditEvents(userId);
+    // Only an invited account has an invitation to manage (P3.9); its events join the account history.
+    const invitation = record.account_status === "invited" ? await deps.repository.getLatestInvitation(userId) : null;
+    const audit = await deps.repository.listAuditEvents(userId, invitation?.id ?? null);
     // Only a suspended account needs its latest status change (never-activated hint, 0018).
     const latest = record.account_status === "suspended" ? await deps.repository.latestStatusChange(userId) : null;
-    return mapUserDetail(record, audit, viewer.id, latest);
+    return mapUserDetail(record, audit, viewer.id, latest, invitation, deps.now?.() ?? new Date());
   }
 
   return {

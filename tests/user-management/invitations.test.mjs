@@ -332,13 +332,14 @@ test("boundary: SUPABASE_SERVICE_ROLE_KEY is read only in src/lib/supabase/admin
   assert.deepEqual(importersOf(/NEXT_PUBLIC_[A-Z_]*SERVICE/), []);
 });
 
-test("boundary: the Auth Admin core does only invite + record; the session repository only create + begin", () => {
+test("boundary: the Auth Admin core does only invite + record; the session repository only create + begin + revoke (P3.9)", () => {
   const admin = code("src/repositories/auth-admin.repository.core.ts");
   assert.deepEqual(Array.from(admin.matchAll(/\.rpc\(\s*["']([a-z_]+)["']/g), (m) => m[1]), ["record_invitation_delivery"]);
   assert.deepEqual(Array.from(admin.matchAll(/auth\.admin\.([a-zA-Z]+)\(/g), (m) => m[1]), ["inviteUserByEmail"]);
   assert.doesNotMatch(admin, /\.from\(|deleteUser|updateUserById|createUser|generateLink|signOut|listUsers|user_metadata|data:\s*\{/);
   const session = code("src/repositories/invitations.repository.core.ts");
-  assert.deepEqual(Array.from(session.matchAll(/\.rpc\(\s*["']([a-z_]+)["']/g), (m) => m[1]).sort(), ["begin_invitation_delivery", "create_user_invitation"]);
+  // P3.9 adds revoke_user_invitation — still the caller's own session, still a database function deciding.
+  assert.deepEqual(Array.from(session.matchAll(/\.rpc\(\s*["']([a-z_]+)["']/g), (m) => m[1]).sort(), ["begin_invitation_delivery", "create_user_invitation", "revoke_user_invitation"]);
   assert.doesNotMatch(session, /\.from\(|lib\/supabase\/admin|auth\.admin/);
   const service = code("src/services/invitations.service.core.ts");
   assert.doesNotMatch(service, /\.rpc\(|\.from\(|lib\/supabase\/|auth\.admin/, "the service only sequences repository calls");

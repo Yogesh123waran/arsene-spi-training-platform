@@ -153,6 +153,23 @@ export interface UserActionAvailability {
   note: string | null;
 }
 
+/**
+ * The latest invitation bound to an INVITED account (P3.9). Lifecycle
+ * facts only — never the address, a token or any Auth data. `status`
+ * "expired" also covers a pending invitation already past its expiry
+ * (the database marks it expired on the next attempt). The two flags only
+ * decide which buttons to show; the database decides every attempt.
+ */
+export interface UserInvitationSummary {
+  id: string;
+  status: "pending" | "accepted" | "revoked" | "expired";
+  expiresAt: string;
+  lastSentAt: string | null;
+  resendCount: number;
+  canResend: boolean;
+  canRevoke: boolean;
+}
+
 export interface UserDetail {
   user: UserSummary;
   isSelf: boolean;
@@ -161,6 +178,8 @@ export interface UserDetail {
   contact: UserContactDetails | null;
   history: UserAuditEntry[];
   actions: UserActionAvailability;
+  /** Only for invited accounts with a bound invitation; null otherwise. */
+  invitation: UserInvitationSummary | null;
 }
 
 /** Plain, serializable result of a lifecycle server action. */
@@ -189,6 +208,12 @@ export type InvitationCreateRefusal =
 
 /** Why the database refused a delivery attempt: the delivery-authorization function's reasons plus the raised-error mappings. */
 export type InvitationDeliverRefusal = "not_found" | "expired" | "not_pending" | "cooldown" | "resend_limit" | "permission" | "invalid";
+
+/** Why the database refused a revocation (the 0017 revoke function's reasons plus the raised-error mappings) — P3.9. */
+export type InvitationRevokeRefusal = "not_found" | "expired" | "not_pending" | "permission" | "invalid";
+
+/** Result of revoking an invitation: a state change only (nothing is deleted). */
+export type InvitationRevokeOutcome = { ok: true } | { ok: false; reason: InvitationRevokeRefusal };
 
 /**
  * Result of creating and/or sending an invitation. Each kind maps to a

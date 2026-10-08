@@ -19,6 +19,7 @@ import type {
   UserAuditEntry,
   UserContactDetails,
   UserDetail,
+  UserInvitationSummary,
   UserSummary,
 } from "@/types/user-management";
 import { ROLE_LABEL } from "@/lib/auth/roles";
@@ -271,6 +272,8 @@ export function describeEvent(eventType: string, detail: Json): string {
     }
     case "enrollment_changed":
       return `Enrolment: ${str(d.from) ?? "new"} → ${str(d.to) ?? "—"}`;
+    case "invitation_resent":
+      return typeof d.resend_count === "number" ? `Invitation resent (resend ${d.resend_count} of ${INVITATION_RESEND_LIMIT})` : "Invitation resent";
     default:
       return EVENT_LABEL[eventType] ?? "Account change";
   }
@@ -356,11 +359,54 @@ export function actionAvailability(user: UserSummary, isSelf: boolean, neverActi
   };
 }
 
+// -------------------------------------------------------------------
+// Invitation of an invited account (P3.9)
+// -------------------------------------------------------------------
+/** The invitation lifecycle columns read for an invited account — no address, token or Auth data. */
+export interface UserInvitationRecord {
+  id: string;
+  status: string;
+  expires_at: string;
+  last_sent_at: string | null;
+  resend_count: number;
+}
+
+/** 0019's resend cap (begin_invitation_delivery) — mirrored only to hide a button the database would refuse. */
+export const INVITATION_RESEND_LIMIT = 5;
+
+const INVITATION_STATUSES = new Set(["pending", "accepted", "revoked", "expired"]);
+
+/**
+ * The invitation summary the panel shows. A pending invitation past its
+ * expiry is shown as expired (the database marks it so on the next
+ * attempt). The flags only decide which buttons appear: resend while
+ * pending and under the cap (a first send has no cap), revoke while
+ * pending. Cooldown is left to the database, which answers with the wait.
+ */
+export function mapInvitation(r: UserInvitationRecord | null, now: Date = new Date()): UserInvitationSummary | null {
+  if (!r || !isUuid(r.id) || !INVITATION_STATUSES.has(r.status)) return null;
+  const pastExpiry = !(Date.parse(r.expires_at) > now.getTime());
+  const status = (r.status === "pending" && pastExpiry ? "expired" : r.status) as UserInvitationSummary["status"];
+  const resendCount = Number.isInteger(r.resend_count) && r.resend_count >= 0 ? r.resend_count : 0;
+  const pending = status === "pending";
+  return {
+    id: r.id,
+    status,
+    expiresAt: r.expires_at,
+    lastSentAt: r.last_sent_at,
+    resendCount,
+    canResend: pending && (r.last_sent_at === null || resendCount < INVITATION_RESEND_LIMIT),
+    canRevoke: pending,
+  };
+}
+
 export function mapUserDetail(
   r: UserDetailRecord,
   audit: UserAuditRecord[],
   viewerId: string,
-  latestStatusChange: { detail: Json } | null = null
+  latestStatusChange: { detail: Json } | null = null,
+  invitation: UserInvitationRecord | null = null,
+  now: Date = new Date()
 ): UserDetail {
   const user = mapUserRecord(r);
   const isSelf = user.id === viewerId;
@@ -372,5 +418,7 @@ export function mapUserDetail(
     contact: mapContactDetails(r, user),
     history: audit.map((a) => mapAuditRecord(a, viewerId)),
     actions: actionAvailability(user, isSelf, isNeverActivated(user, latestStatusChange)),
+    // Only an invited account has an invitation to manage; anything else shows none.
+    invitation: user.accountStatus === "invited" ? mapInvitation(invitation, now) : null,
   };
 }

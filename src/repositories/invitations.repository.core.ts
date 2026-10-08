@@ -7,6 +7,8 @@
  *   begin_invitation_delivery(id)        0019: scope, pending/unexpired,
  *                                        row lock, cooldown, resend cap;
  *                                        returns the database-owned address
+ *   revoke_user_invitation(id, reason)   0017: scope, pending/unexpired, row
+ *                                        lock; state change + audit only (P3.9)
  *
  * Nothing here writes a table directly or decides any rule. Factory
  * without `server-only` so it can be tested against a local database;
@@ -34,6 +36,8 @@ export class InvitationsFunctionError extends InvitationsRepositoryError {
 
 /** `code`: the generated student/trainer code (0020); null for a Super Admin invitation. */
 export type CreateInvitationResult = { ok: true; invitationId: string; code: string | null } | { ok: false; reason: string };
+
+export type RevokeInvitationResult = { ok: true } | { ok: false; reason: string };
 
 export type BeginDeliveryResult =
   | { ok: true; invitationId: string; email: string; expiresAt: string; attempt: "initial" | "resend"; resendCount: number }
@@ -103,6 +107,12 @@ export function createInvitationsRepository(getClient: () => Promise<Client | nu
         reason: typeof d.reason === "string" ? d.reason : "unknown",
         ...(typeof d.retry_after_seconds === "number" ? { retryAfterSeconds: d.retry_after_seconds } : {}),
       };
+    },
+
+    /** P3.9: revoke_user_invitation (0017) — a state change only; the database decides scope and state. */
+    async revokeInvitation(invitationId: string, reason: string | null): Promise<RevokeInvitationResult> {
+      const d = await call("revokeInvitation", (s) => s.rpc("revoke_user_invitation", { p_invitation_id: invitationId, p_reason: reason }));
+      return d.ok === true ? { ok: true } : { ok: false, reason: typeof d.reason === "string" ? d.reason : "unknown" };
     },
   };
 }

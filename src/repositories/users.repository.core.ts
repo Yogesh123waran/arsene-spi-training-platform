@@ -2,7 +2,9 @@
  * Users repository (Phase 7 P3.2 reads, P3.3 lifecycle actions):
  * public.profiles with each account's student/trainer record, contact
  * details (student_details / trainer_details) and batches, the account's
- * audit history (user_admin_events), and the 0017 Super Admin functions.
+ * audit history (user_admin_events), an invited account's latest
+ * invitation (user_invitations, lifecycle columns only — P3.9), and the
+ * 0017 Super Admin functions.
  *
  * Always the caller's own session (never the service role): RLS decides
  * every row read, and every change goes through a 0017 SECURITY DEFINER
@@ -23,7 +25,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AccountStatusColumn, AppRoleColumn, Database, Json } from "@/lib/supabase/types";
 import { KEYSET_PAGE_SIZE, readAllByKeyset } from "@/lib/supabase/paging";
 import type { UserProfileRecord } from "@/lib/user-management/users";
-import type { UserAuditRecord, UserDetailRecord } from "@/lib/user-management/lifecycle";
+import type { UserAuditRecord, UserDetailRecord, UserInvitationRecord } from "@/lib/user-management/lifecycle";
 
 type Client = SupabaseClient<Database, "public">;
 
@@ -72,6 +74,9 @@ export const USER_DETAIL_SELECT = `
 `;
 
 export const AUDIT_HISTORY_LIMIT = 25;
+
+/** The invitation columns the detail panel needs (P3.9) — never the address, a token or Auth data. */
+export const USER_INVITATION_SELECT = "id, status, expires_at, last_sent_at, resend_count";
 
 /** What a 0017 function answered: { ok: true, ... } or { ok: false, reason }. */
 export interface UsersFunctionOutcome {
@@ -161,12 +166,32 @@ export function createUsersRepository(getClient: () => Promise<Client | null>, o
       );
     },
 
-    /** The account's most recent user-management audit rows, newest first (Super Admin RLS). */
-    async listAuditEvents(userId: string): Promise<UserAuditRecord[]> {
-      const rows = await read<UserAuditRecord[]>("listAuditEvents", (s) =>
-        s.from("user_admin_events").select("id, occurred_at, event_type, actor_id, detail").eq("target_user_id", userId).order("id", { ascending: false }).limit(AUDIT_HISTORY_LIMIT)
+    /**
+     * The account's most recent user-management audit rows, newest first (Super Admin RLS) — plus,
+     * when given, the rows of its invitation (P3.9: invitation events carry the invitation id, not the account).
+     */
+    async listAuditEvents(userId: string, invitationId: string | null = null): Promise<UserAuditRecord[]> {
+      const recent = (column: "target_user_id" | "invitation_id", id: string) =>
+        read<UserAuditRecord[]>("listAuditEvents", (s) =>
+          s.from("user_admin_events").select("id, occurred_at, event_type, actor_id, detail").eq(column, id).order("id", { ascending: false }).limit(AUDIT_HISTORY_LIMIT)
+        );
+      const own = (await recent("target_user_id", userId)) ?? [];
+      if (!invitationId) return own;
+      // Two plain reads merged by event id (an event can match both) — newest first, same limit.
+      const byId = new Map<number, UserAuditRecord>();
+      for (const r of [...own, ...((await recent("invitation_id", invitationId)) ?? [])]) byId.set(r.id, r);
+      return [...byId.values()].sort((a, b) => b.id - a.id).slice(0, AUDIT_HISTORY_LIMIT);
+    },
+
+    /**
+     * The latest invitation bound to this account (P3.9), lifecycle columns only — no address, token or
+     * Auth data. Super Admin RLS; null when there is none.
+     */
+    async getLatestInvitation(userId: string): Promise<UserInvitationRecord | null> {
+      const rows = await read<UserInvitationRecord[]>("getLatestInvitation", (s) =>
+        s.from("user_invitations").select(USER_INVITATION_SELECT).eq("auth_user_id", userId).order("created_at", { ascending: false }).limit(1)
       );
-      return rows ?? [];
+      return rows?.[0] ?? null;
     },
 
     /**

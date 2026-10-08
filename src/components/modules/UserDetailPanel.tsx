@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useTransition } from "react";
-import { History, Pencil, RotateCcw, ShieldAlert, UserCog, X } from "lucide-react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { Ban, History, Mail, Pencil, RotateCcw, Send, ShieldAlert, UserCog, X } from "lucide-react";
 import { Avatar } from "@/components/ui/Avatar";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -15,8 +15,10 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { useToast } from "@/components/ui/Toast";
 import { ROLE_LABEL } from "@/lib/auth/roles";
 import { ACCOUNT_STATUS_LABEL } from "@/lib/user-management/users";
-import { LIMITS } from "@/lib/user-management/lifecycle";
+import { INVITATION_RESEND_LIMIT, LIMITS } from "@/lib/user-management/lifecycle";
+import { outcomeTone } from "@/lib/user-management/invitations";
 import { changeUserRoleAction, setAccountStatusAction, updateUserDetailsAction } from "@/services/users.actions";
+import { resendInvitationAction, revokeInvitationAction } from "@/services/invitations.actions";
 import { formatDate, formatDateTime } from "@/utils/format";
 import type { UserRole } from "@/types/user";
 import type { UserActionResult, UserDetail } from "@/types/user-management";
@@ -274,6 +276,123 @@ function DetailsView({ detail }: { detail: UserDetail }) {
 }
 
 // -------------------------------------------------------------------
+// Invitation of an invited account (P3.9)
+// -------------------------------------------------------------------
+function RevokeInvitationDialog({ detail, open, onClose }: { detail: UserDetail; open: boolean; onClose: () => void }) {
+  const [reason, setReason] = useState("");
+  const { isPending, run } = useLifecycleAction();
+  useEffect(() => setReason(""), [open]);
+  const inv = detail.invitation;
+  if (!open || !inv) return null;
+  return (
+    <Modal
+      isOpen
+      onClose={() => {
+        if (!isPending) onClose();
+      }}
+      title="Revoke this invitation?"
+      description={`${displayName(detail)} will no longer be able to accept it. Only the invitation changes: the account stays Invited, nothing is deleted, and the address can be invited again later.`}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose} disabled={isPending}>
+            Cancel
+          </Button>
+          <Button variant="danger" isLoading={isPending} onClick={() => run(() => revokeInvitationAction(inv.id, reason.trim() || null), onClose)}>
+            Revoke invitation
+          </Button>
+        </>
+      }
+    >
+      <dl className="mb-4 grid grid-cols-[8rem_1fr] gap-y-1.5 text-sm">
+        <dt className="text-ink-muted">Account</dt>
+        <dd className="text-ink">{detail.user.email ?? displayName(detail)}</dd>
+        <dt className="text-ink-muted">Invitation</dt>
+        <dd>
+          <StatusBadge status={inv.status} />
+        </dd>
+        <dt className="text-ink-muted">Expires</dt>
+        <dd className="text-ink">{formatDateTime(inv.expiresAt)}</dd>
+      </dl>
+      <label className="flex flex-col gap-1.5">
+        <span className="text-sm font-medium text-ink">Reason (optional, kept with the invitation)</span>
+        <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={LIMITS.reason} className={textareaClass} disabled={isPending} />
+        <span className="text-xs text-ink-faint">
+          {reason.trim().length}/{LIMITS.reason}
+        </span>
+      </label>
+    </Modal>
+  );
+}
+
+/**
+ * The invited account's latest invitation: status, when it was sent, and — while it is pending —
+ * Resend (the existing delivery path; the database enforces cooldown, cap and expiry) and Revoke
+ * (after a confirmation). The buttons are hints only; the server and the database decide.
+ */
+function InvitationSection({ detail }: { detail: UserDetail }) {
+  const inv = detail.invitation!;
+  const router = useRouter();
+  const { showToast } = useToast();
+  const [isPending, startTransition] = useTransition();
+  const sending = useRef(false);
+  const [revokeOpen, setRevokeOpen] = useState(false);
+
+  function resend() {
+    // Duplicate-submission guard: one resend request at a time.
+    if (sending.current || isPending) return;
+    sending.current = true;
+    startTransition(async () => {
+      try {
+        const result = await resendInvitationAction(inv.id);
+        if (result.status === "outcome") showToast({ variant: outcomeTone(result.outcome), title: result.message });
+        else showToast({ variant: "error", title: "The invitation was not resent", description: result.error });
+      } finally {
+        sending.current = false;
+        router.refresh();
+      }
+    });
+  }
+
+  const pending = inv.status === "pending";
+  return (
+    <section aria-labelledby="ud-invitation" className="flex flex-col gap-2 border-t border-surface-border pt-4">
+      <h3 id="ud-invitation" className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-muted">
+        <Mail className="h-3.5 w-3.5" aria-hidden /> Invitation
+      </h3>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <StatusBadge status={inv.status} />
+        <span className="text-xs text-ink-muted">
+          {inv.lastSentAt ? `Last sent ${formatDateTime(inv.lastSentAt)}` : "Not sent yet"}
+          {pending ? ` · expires ${formatDateTime(inv.expiresAt)}` : inv.status === "expired" ? ` · expired ${formatDateTime(inv.expiresAt)}` : ""}
+          {inv.resendCount > 0 ? ` · resent ${inv.resendCount} of ${INVITATION_RESEND_LIMIT} times` : ""}
+        </span>
+      </div>
+      {!pending && (
+        <p className="text-xs text-ink-muted">This invitation can no longer be accepted. To give this person access, invite the address again from Students or Trainers.</p>
+      )}
+      {pending && !inv.canResend && (
+        <p className="text-xs text-ink-muted">This invitation has been resent the maximum number of times. Revoke it, then invite the address again if needed.</p>
+      )}
+      {(inv.canResend || inv.canRevoke) && (
+        <div className="flex flex-wrap gap-2">
+          {inv.canResend && (
+            <Button size="sm" variant="secondary" isLoading={isPending} onClick={resend}>
+              <Send className="h-3.5 w-3.5" /> Resend invitation
+            </Button>
+          )}
+          {inv.canRevoke && (
+            <Button size="sm" variant="danger" disabled={isPending} onClick={() => setRevokeOpen(true)}>
+              <Ban className="h-3.5 w-3.5" /> Revoke invitation
+            </Button>
+          )}
+        </div>
+      )}
+      <RevokeInvitationDialog detail={detail} open={revokeOpen} onClose={() => setRevokeOpen(false)} />
+    </section>
+  );
+}
+
+// -------------------------------------------------------------------
 // Panel
 // -------------------------------------------------------------------
 /**
@@ -371,6 +490,8 @@ export function UserDetailPanel({ detail, closeHref }: { detail: UserDetail; clo
             )}
           </section>
         </div>
+
+        {detail.invitation && <InvitationSection key={detail.invitation.id} detail={detail} />}
 
         {detail.contact && (
           <section aria-labelledby="ud-details" className="flex flex-col gap-3 border-t border-surface-border pt-4">

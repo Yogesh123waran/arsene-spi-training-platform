@@ -17,12 +17,13 @@
 
 import { revalidatePath } from "next/cache";
 import { invitationsService, InvitationsAuthorizationError, InvitationsInputError } from "./invitations.service";
-import { GENERIC_INVITATION_ERROR, invitationOutcomeMessage } from "@/lib/user-management/invitations";
+import { GENERIC_INVITATION_ERROR, REVOKE_REASON_MESSAGE, REVOKE_SUCCESS_MESSAGE, invitationOutcomeMessage } from "@/lib/user-management/invitations";
 import type {
   InvitationActionResult,
   InvitationSendOutcome,
   StudentInvitationInput,
   TrainerInvitationInput,
+  UserActionResult,
 } from "@/types/user-management";
 
 const asObject = (v: unknown): Record<string, unknown> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {});
@@ -81,7 +82,29 @@ export async function inviteTrainerAction(input: TrainerInvitationInput): Promis
   );
 }
 
-/** Resend the invitation the dialog just created (the database enforces cooldown, cap and expiry). */
+/**
+ * Resend a pending invitation — the one the dialog just created, or (P3.9) an invited account's
+ * existing invitation from the Users panel. The database enforces cooldown, cap and expiry.
+ */
 export async function resendInvitationAction(invitationId: string): Promise<InvitationActionResult> {
   return run("resendInvitation", () => invitationsService.resendInvitation(invitationId));
+}
+
+/**
+ * P3.9: revoke a pending invitation (Super Admin; the database decides scope and state and audits it).
+ * A state change only — no Auth user, profile or domain record is deleted. Only the id and an optional
+ * reason are accepted from the browser.
+ */
+export async function revokeInvitationAction(invitationId: string, reason?: string | null): Promise<UserActionResult> {
+  try {
+    const outcome = await invitationsService.revokeInvitation(invitationId, reason ?? null);
+    // A refusal for an expired/no-longer-pending invitation may itself have changed what the page shows.
+    if (outcome.ok || outcome.reason === "expired" || outcome.reason === "not_pending") revalidateUserPages();
+    return outcome.ok ? { ok: true, message: REVOKE_SUCCESS_MESSAGE } : { ok: false, error: REVOKE_REASON_MESSAGE[outcome.reason] };
+  } catch (err) {
+    // These carry messages written to be shown to users.
+    if (err instanceof InvitationsAuthorizationError || err instanceof InvitationsInputError) return { ok: false, error: err.message };
+    console.error("[invitations.actions] revokeInvitation:", err instanceof Error ? err.name : "unknown error");
+    return { ok: false, error: GENERIC_INVITATION_ERROR };
+  }
 }
