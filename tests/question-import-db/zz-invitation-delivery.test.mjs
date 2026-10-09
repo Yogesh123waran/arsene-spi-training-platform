@@ -99,18 +99,24 @@ test("Super Admin: initial delivery is authorized with only database-owned value
   assert.equal(await db.admin(`select pg_get_function_arguments('public.begin_invitation_delivery(uuid)'::regprocedure)`), "p_invitation_id uuid", "no address can be supplied");
 });
 
-test("trainer authorization stays scoped: own invitation in a batch they currently teach only", async () => {
+test("0028: trainers cannot begin delivery — not even for an invitation they created before 0028 — nor create one", async () => {
+  const sa = as(W.idv_SA);
   const t = as(W.idv_T);
-  const own = await invite(t, { batch_id: W.idv_B });
-  assert.equal((await begin(t, own)).ok, true);
-  assert.deepEqual(await begin(as(W.idv_T2), own), { ok: false, reason: "not_found" }, "another trainer");
-  const adminInBatch = await invite(as(W.idv_SA), { batch_id: W.idv_B });
-  assert.deepEqual(await begin(t, adminInBatch), { ok: false, reason: "not_found" }, "not the inviter");
-  const ownB3 = await invite(t, { batch_id: W.idv_B3 });
-  await db.exec(`update public.batches set status = 'completed' where id = t.id('idv_B3');`);
-  assert.deepEqual(await begin(t, ownB3), { ok: false, reason: "not_found" }, "no longer a current batch");
-  assert.equal((await inv(ownB3)).last_sent_at, null);
-  assert.equal((await begin(as(W.idv_SA), ownB3)).ok, true, "a Super Admin may send any pending invitation");
+  // A pre-0028 trainer invitation: made by the Super Admin, then attributed to the trainer as the superuser
+  // (triggers paused for this test-only statement).
+  const legacy = await invite(sa, { batch_id: W.idv_B });
+  await db.run(`set session_replication_role = replica; update public.user_invitations set invited_by = '${W.idv_T}' where id = '${legacy}';`);
+  const adminInBatch = await invite(sa, { batch_id: W.idv_B });
+  for (const [id, label] of [[legacy, "own (pre-0028) invitation"], [adminInBatch, "Super Admin invitation in the trainer's batch"]]) {
+    assert.equal((await err(t, "begin_invitation_delivery", { p_invitation_id: id }))?.code, "42501", label);
+    assert.equal((await inv(id)).last_sent_at, null, `${label}: nothing authorized`);
+  }
+  assert.equal((await err(as(W.idv_T2), "begin_invitation_delivery", { p_invitation_id: legacy }))?.code, "42501", "another trainer");
+  assert.equal((await err(t, "create_user_invitation", { p: inviteP({ batch_id: W.idv_B }) }))?.code, "42501", "no new invitation either");
+  assert.deepEqual(await events(legacy, "invitation_resent"), []);
+  // Unchanged for the Super Admin: any pending invitation, including the legacy one.
+  assert.equal((await begin(sa, legacy)).ok, true);
+  assert.equal((await begin(sa, adminInBatch)).ok, true);
 });
 
 test("students, signed-out, user-less and suspended Super Admin sessions cannot begin delivery", async () => {
@@ -310,10 +316,10 @@ test("D1: an unaccepted placeholder (revoked or expired invitation) can be invit
   assert.equal(await reasonOf(sa, { email: q.email }), "ok");
   assert.equal((await inv(q.id)).status, "expired");
 
-  // A trainer may also re-invite a placeholder as a student into their own current batch …
+  // 0028: a trainer cannot re-invite a placeholder (no invitations at all) …
   const t = await placeholder();
-  assert.equal(await reasonOf(as(W.idv_T), { email: t.email, batch_id: W.idv_B }), "ok");
-  // … but D1 never widens who may invite which role.
+  assert.equal((await err(as(W.idv_T), "create_user_invitation", { p: inviteP({ email: t.email, batch_id: W.idv_B }) }))?.code, "42501");
+  // … and D1 never widens who may invite which role.
   const u = await placeholder();
   assert.equal((await err(as(W.idv_T), "create_user_invitation", { p: inviteP({ email: u.email, role: "super_admin", student_code: undefined, batch_id: W.idv_B }) }))?.code, "42501");
   assert.deepEqual(await profile(u.uid), { role: "student", status: "invited" });
@@ -327,7 +333,7 @@ test("D1 never applies to real or tampered accounts", async () => {
   const real = await authUser(email);
   assert.equal((await call(as(real), "accept_user_invitation")).ok, true);
   assert.equal(await reasonOf(sa, { email }), "account_exists", "active account");
-  assert.equal(await reasonOf(as(W.idv_T), { email, batch_id: W.idv_B }), "email_unavailable", "trainers get the generic answer");
+  assert.equal((await err(as(W.idv_T), "create_user_invitation", { p: inviteP({ email, batch_id: W.idv_B }) }))?.code, "42501", "0028: trainers are refused before any address check");
   // Suspended real account.
   assert.equal((await call(sa, "admin_set_account_status", { p_user_id: real, p_status: "suspended" })).ok, true);
   assert.equal(await reasonOf(sa, { email }), "account_exists", "suspended account");

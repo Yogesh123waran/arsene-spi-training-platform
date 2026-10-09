@@ -187,12 +187,11 @@ test("refusals: trainers and students are refused by the service before any call
     await assert.rejects(svc.resendInvitation(invitationId), InvitationsAuthorizationError);
     assert.equal(auth.calls.length, 0);
   }
-  // Direct database calls on their own sessions: a student has no authority; a trainer is out of scope
-  // (not their invitation) and gets the same answer as an unknown id.
+  // Direct database calls on their own sessions: neither a student nor (0029) a trainer has any authority.
   const student = await db.client({ role: "authenticated", userId: W.ilc_S }).rpc("revoke_user_invitation", { p_invitation_id: invitationId });
   assert.equal(student.error?.code, "42501");
   const trainer = await db.client({ role: "authenticated", userId: W.ilc_T }).rpc("revoke_user_invitation", { p_invitation_id: invitationId });
-  assert.deepEqual(trainer.data, { ok: false, reason: "not_found" });
+  assert.equal(trainer.error?.code, "42501");
   assert.equal((await inv(invitationId)).status, "pending", "nothing changed");
 
   const svc = invitationsAs(W.ilc_SA, "admin");

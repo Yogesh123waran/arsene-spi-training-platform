@@ -104,11 +104,12 @@ test("anonymous callers cannot execute any 0017 function; students, trainers and
   await newAuthUser("um_INV0", "invited0@um.test");
   for (const key of ["um_S1", "um_T", "um_INV0"]) {
     for (const [fn, args] of ADMIN_CALLS()) {
-      if (key === "um_T" && fn === "create_user_invitation") continue; // trainers may invite students (tested below)
       const e = await err(as(key), fn, args);
       assert.equal(e?.code, "42501", `${key} ${fn}`);
     }
   }
+  // 0028: trainers cannot invite either (tested in detail below).
+  assert.equal((await err(as("um_T"), "create_user_invitation", { p: inviteP({ batch_id: U.um_B1 }) }))?.code, "42501", "um_T cannot invite");
   for (const key of ["um_S1", "um_INV0"]) {
     assert.equal((await err(as(key), "create_user_invitation", { p: inviteP() }))?.code, "42501", `${key} cannot invite`);
     assert.equal((await err(as(key), "trainer_enroll_student", { p_batch_id: U.um_B1, p_student_id: U.um_S1 }))?.code, "42501");
@@ -160,47 +161,56 @@ test("Super Admin invitations: any role, validation, one pending invitation per 
   ]) assert.equal((await err(sa, "create_user_invitation", { p: bad }))?.code, "22023", label);
 });
 
-test("trainer invitations: students only, only into batches they currently teach, generic answer for unavailable addresses, rate limit", async () => {
+test("0028: trainers cannot create invitations — for any batch, any role, any address — nor begin delivery; nothing is written", async () => {
   const t = as("um_T");
-  const ok = await call(t, "create_user_invitation", { p: inviteP({ batch_id: U.um_B1 }) });
-  assert.equal(ok.ok, true);
-  assert.equal((await call(t, "create_user_invitation", { p: inviteP({ batch_id: U.um_B2 }) })).ok, true, "upcoming batch is current");
-  for (const [p, code, label] of [
-    [inviteP({ batch_id: U.um_BC }), "42501", "completed batch"],
-    [inviteP({ batch_id: U.um_BX }), "42501", "another trainer's batch"],
-    [inviteP(), "22023", "no batch"],
-    [inviteP({ role: "trainer" }), "42501", "trainer role"],
-    [inviteP({ role: "super_admin" }), "42501", "super admin role"],
-  ]) assert.equal((await err(t, "create_user_invitation", { p }))?.code, code, label);
+  const before = await db.admin("select count(*) from public.user_invitations");
+  for (const [p, label] of [
+    [inviteP({ batch_id: U.um_B1 }), "own ongoing batch"],
+    [inviteP({ batch_id: U.um_B2 }), "own upcoming batch"],
+    [inviteP({ batch_id: U.um_BC }), "completed batch"],
+    [inviteP({ batch_id: U.um_BX }), "another trainer's batch"],
+    [inviteP(), "no batch"],
+    [inviteP({ email: "um_s2@um.test", batch_id: U.um_B1 }), "an address that has an account"],
+    [inviteP({ role: "trainer" }), "trainer role"],
+    [inviteP({ role: "super_admin" }), "super admin role"],
+  ]) {
+    const e = await err(t, "create_user_invitation", { p });
+    assert.equal(e?.code, "42501", label);
+    assert.equal(e.message, "You don't have permission to do that.", `${label}: the generic refusal, no scope detail`);
+  }
+  // The former rate-limit trainer is refused on the first call — no budget to consume.
+  assert.equal((await err(as("um_TR"), "create_user_invitation", { p: inviteP({ batch_id: U.um_BR }) }))?.code, "42501");
+  assert.equal(await db.admin("select count(*) from public.user_invitations"), before, "no invitation row written");
+  assert.deepEqual(await events(`actor_id in ('${U.um_T}', '${U.um_TR}') and event_type in ('invitation_created', 'invitation_withheld')`), [], "no audit rows (no reservation, no withheld attempts)");
 
-  const existing = await call(t, "create_user_invitation", { p: inviteP({ email: "um_s2@um.test", batch_id: U.um_B1 }) });
-  const pendingEmail = await db.admin(`select email from public.user_invitations where id = '${ok.invitation_id}'`);
-  const pending = await call(t, "create_user_invitation", { p: inviteP({ email: pendingEmail, batch_id: U.um_B1 }) });
-  assert.deepEqual(existing, { ok: false, reason: "email_unavailable" });
-  assert.deepEqual(pending, existing, "the same answer whether the address has an account or a pending invitation");
-  const withheld = await events(`actor_id = '${U.um_T}' and event_type = 'invitation_withheld'`);
-  assert.equal(withheld.length, 2);
-  assert.ok(!JSON.stringify(withheld).includes("@"), "no email in the audit");
-
-  // Rate limit: 20 invitations (or withheld attempts) per trainer per hour.
-  const tr = as("um_TR");
-  for (let i = 0; i < 20; i++) assert.equal((await call(tr, "create_user_invitation", { p: inviteP({ batch_id: U.um_BR }) })).ok, true, `#${i + 1}`);
-  assert.deepEqual(await call(tr, "create_user_invitation", { p: inviteP({ batch_id: U.um_BR }) }), { ok: false, reason: "rate_limited" });
+  // begin_invitation_delivery: refused for a Super Admin's invitation in the trainer's own batch.
+  const sa = as("um_SA");
+  const inv = await call(sa, "create_user_invitation", { p: inviteP({ batch_id: U.um_B1 }) });
+  assert.equal((await err(t, "begin_invitation_delivery", { p_invitation_id: inv.invitation_id }))?.code, "42501");
+  assert.equal(await db.admin(`select last_sent_at is null from public.user_invitations where id = '${inv.invitation_id}'`), true);
+  // The Super Admin workflow is unchanged.
+  assert.equal(inv.ok, true);
+  assert.equal((await call(sa, "begin_invitation_delivery", { p_invitation_id: inv.invitation_id })).ok, true);
 });
 
 test("revoke and expiry: state changes only, scoped, audited; nothing is deleted", async () => {
   const sa = as("um_SA");
   const t = as("um_T");
   const a = await call(sa, "create_user_invitation", { p: inviteP({ batch_id: U.um_B1 }) });
-  const own = await call(t, "create_user_invitation", { p: inviteP({ batch_id: U.um_B1 }) });
-  assert.deepEqual(await call(t, "revoke_user_invitation", { p_invitation_id: a.invitation_id }), { ok: false, reason: "not_found" }, "a trainer cannot revoke someone else's invitation");
-  assert.deepEqual(await call(t, "revoke_user_invitation", { p_invitation_id: own.invitation_id, p_reason: "Wrong person" }), { ok: true });
+  // A pre-0028 invitation a trainer created (0028 refuses new ones): made by the Super Admin, then attributed to the
+  // trainer as the superuser (triggers paused for this test-only statement). 0029: the trainer cannot revoke it;
+  // the Super Admin can (detailed in zz-invitation-revoke-super-admin-only).
+  const own = await call(sa, "create_user_invitation", { p: inviteP({ batch_id: U.um_B1 }) });
+  await db.run(`set session_replication_role = replica; update public.user_invitations set invited_by = '${U.um_T}' where id = '${own.invitation_id}';`);
+  assert.equal((await err(t, "revoke_user_invitation", { p_invitation_id: a.invitation_id }))?.code, "42501", "a trainer cannot revoke someone else's invitation");
+  assert.equal((await err(t, "revoke_user_invitation", { p_invitation_id: own.invitation_id, p_reason: "Wrong person" }))?.code, "42501", "0029: nor their own legacy one");
+  assert.deepEqual(await call(sa, "revoke_user_invitation", { p_invitation_id: own.invitation_id, p_reason: "Wrong person" }), { ok: true });
   assert.deepEqual(await call(sa, "revoke_user_invitation", { p_invitation_id: a.invitation_id }), { ok: true });
   assert.deepEqual(await call(sa, "revoke_user_invitation", { p_invitation_id: a.invitation_id }), { ok: false, reason: "not_pending", status: "revoked" });
   const r = await db.admin(`select to_json(x) from (select status, revoked_by, revoke_reason, revoked_at is not null as at from public.user_invitations where id = '${own.invitation_id}') x`);
-  assert.deepEqual(r, { status: "revoked", revoked_by: U.um_T, revoke_reason: "Wrong person", at: true });
+  assert.deepEqual(r, { status: "revoked", revoked_by: U.um_SA, revoke_reason: "Wrong person", at: true });
   assert.equal((await events(`invitation_id = '${own.invitation_id}'`)).map((e) => e.type).join(), "invitation_created,invitation_revoked");
-  assert.equal((await err(t, "revoke_user_invitation", { p_invitation_id: own.invitation_id, p_reason: "x".repeat(501) }))?.code, "22023");
+  assert.equal((await err(sa, "revoke_user_invitation", { p_invitation_id: randomUUID(), p_reason: "x".repeat(501) }))?.code, "22023", "the reason limit is unchanged");
 
   // Expiry (test-only: move an invitation's expiry into the past as the superuser).
   const e1 = await call(sa, "create_user_invitation", { p: inviteP() });
