@@ -8,7 +8,8 @@
  *
  * The ROLE is fixed here, per action — never taken from the browser:
  * inviteStudentAction always invites a student, inviteTrainerAction a
- * trainer, and only the fields of that kind are copied from the input
+ * trainer, inviteSuperAdminAction a Super Admin (P3.12: name and email
+ * only), and only the fields of that kind are copied from the input
  * (anything else the browser sends, including a role, is dropped).
  * Results are plain and safe: an InvitationSendOutcome with its message,
  * or a fixed error sentence. Raw database/Auth errors never leave the
@@ -22,6 +23,7 @@ import type {
   InvitationActionResult,
   InvitationSendOutcome,
   StudentInvitationInput,
+  SuperAdminInvitationInput,
   TrainerInvitationInput,
   UserActionResult,
 } from "@/types/user-management";
@@ -78,6 +80,22 @@ export async function inviteTrainerAction(input: TrainerInvitationInput): Promis
       organization: t.organization,
       designation: t.designation,
       specializations: t.specializations,
+    })
+  );
+}
+
+/**
+ * Invite a Super Admin (P3.12). The role is fixed here ("admin" = super_admin); only the name and email are
+ * copied from the input — never a role, batch or code. invitationsService admits only an active Super Admin and
+ * create_user_invitation (0028) re-checks it in the database; delivery and acceptance are the existing ones.
+ */
+export async function inviteSuperAdminAction(input: SuperAdminInvitationInput): Promise<InvitationActionResult> {
+  const a = asObject(input);
+  return run("inviteSuperAdmin", () =>
+    invitationsService.inviteUser({
+      role: "admin",
+      email: a.email,
+      fullName: a.fullName,
     })
   );
 }

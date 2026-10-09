@@ -192,7 +192,8 @@ test("sources: page → service → repository → session RPC; no service role,
 
   const table = strip(src("src/components/modules/StudentsTable.tsx"));
   assert.match(table, /trainerEdit = false/, "off unless the trainer page asks");
-  assert.match(table, /\{!trainerEdit \? \(\s*<DropdownItem onClick=\{\(\) => notImplemented\("Edit student"\)\}>/, "the Super Admin menu is unchanged");
+  // P3.11-A: the Super Admin Edit opens the student's account panel (Users page) — never the trainer dialog.
+  assert.match(table, /\{!trainerEdit \? \(\s*canEditAsStudent\(s\) \? \(\s*<DropdownItem onClick=\{\(\) => editAccount\(s\.id\)\}>/, "the Super Admin Edit is separate from the trainer edit");
   assert.match(table, /\) : s\.editable === true \? \(\s*<DropdownItem onClick=\{\(\) => setEditTarget\(\{ id: s\.id, name: s\.name \}\)\}>/, "Edit only on editable trainer rows");
   assert.match(src("src/app/trainer/students/page.tsx"), /<StudentsTable rows=\{students\} trainerEdit \/>/);
   assert.doesNotMatch(src("src/app/admin/students/page.tsx"), /trainerEdit/);

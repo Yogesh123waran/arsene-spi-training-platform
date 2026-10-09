@@ -40,9 +40,24 @@ function logDbError(context: string, error: unknown) {
  */
 const TRAINER_LIST_SELECT = `
   id, full_name, status,
+  profiles!trainers_id_fkey ( account_status, role ),
   trainer_details ( email ),
   batches ( name, status, courses ( title ), batch_students ( student_id, enrollment_status ) )
 `;
+
+type ProfileEmbed = { account_status: string; role: string } | { account_status: string; role: string }[] | null | undefined;
+
+/** profiles.account_status when readable (Super Admin), else undefined (P3.11-B). */
+function accountStatusOf(profile: ProfileEmbed): TrainerSummary["accountStatus"] {
+  const value = (Array.isArray(profile) ? profile[0] : profile)?.account_status;
+  return value === "active" || value === "invited" || value === "suspended" ? value : undefined;
+}
+
+/** profiles.role when readable (Super Admin), else undefined (P3.11-C). */
+function accountRoleOf(profile: ProfileEmbed): TrainerSummary["accountRole"] {
+  const value = (Array.isArray(profile) ? profile[0] : profile)?.role;
+  return value === "super_admin" || value === "trainer" || value === "student" ? value : undefined;
+}
 
 /** Sorted, de-duplicated, non-empty strings. */
 function uniqueSorted(values: (string | null | undefined)[]): string[] {
@@ -83,6 +98,8 @@ export const trainersRepository = {
           batches: uniqueSorted(activeBatches.map((b) => b.name)),
           students: enrolledStudents.size,
           status: row.status,
+          accountStatus: accountStatusOf(row.profiles),
+          accountRole: accountRoleOf(row.profiles),
         };
       });
     } catch (err) {

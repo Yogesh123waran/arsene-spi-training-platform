@@ -157,6 +157,14 @@ export function userDetailHref(basePath: string, filters: UserListFilters, userI
   return `${href}${href.includes("?") ? "&" : "?"}user=${encodeURIComponent(userId)}`;
 }
 
+/** `?edit=` value that opens the detail panel with its existing details form already open (P3.11-C). */
+export const EDIT_DETAILS_PARAM = "details";
+
+/** The detail panel of one account with its details form open — the same form and save path as the panel's Edit. */
+export function userEditDetailsHref(basePath: string, filters: UserListFilters, userId: string): string {
+  return `${userDetailHref(basePath, filters, userId)}&edit=${EDIT_DETAILS_PARAM}`;
+}
+
 // -------------------------------------------------------------------
 // Mapping
 // -------------------------------------------------------------------

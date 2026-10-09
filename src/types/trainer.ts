@@ -37,4 +37,14 @@ export interface TrainerSummary {
   /** Distinct students currently enrolled (enrollment_status = 'enrolled') in those batches. */
   students: number;
   status: UserStatus;
+  /**
+   * The account's status (profiles.account_status) when the caller may read the profile (Super Admin);
+   * "suspended" = removed / deactivated (P3.11-B). Undefined when unreadable (e.g. the trainer view) or in demo mode.
+   */
+  accountStatus?: "active" | "invited" | "suspended";
+  /**
+   * The account's current role (profiles.role) when readable (Super Admin), P3.11-C. A row whose role is no
+   * longer "trainer" is a stale trainer record (role changed): it is not offered "Edit trainer".
+   */
+  accountRole?: "super_admin" | "trainer" | "student";
 }

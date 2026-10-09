@@ -14,10 +14,11 @@ import { revalidatePath } from "next/cache";
 import { usersService, UsersActionError, UsersAuthorizationError } from "./users.service";
 import type { UserActionResult } from "@/types/user-management";
 
-async function run(context: string, fn: () => Promise<string>): Promise<UserActionResult> {
+async function run(context: string, fn: () => Promise<string>, alsoRevalidate: string[] = []): Promise<UserActionResult> {
   try {
     const message = await fn();
     revalidatePath("/admin/users");
+    for (const p of alsoRevalidate) revalidatePath(p);
     return { ok: true, message };
   } catch (err) {
     // These carry messages written to be shown to users.
@@ -39,6 +40,16 @@ export async function changeUserRoleAction(
   record?: { fullName?: string } | null
 ): Promise<UserActionResult> {
   return run("changeUserRole", () => usersService.changeRole(userId, role, record ?? null));
+}
+
+/** Remove (deactivate) a student from the Students list. Only the account id comes from the browser. */
+export async function removeStudentAccountAction(userId: string): Promise<UserActionResult> {
+  return run("removeStudent", () => usersService.removeStudent(userId), ["/admin/students"]);
+}
+
+/** Remove (deactivate) a trainer from the Trainers list; refused while current batches/classes are assigned. */
+export async function removeTrainerAccountAction(userId: string): Promise<UserActionResult> {
+  return run("removeTrainer", () => usersService.removeTrainer(userId), ["/admin/trainers"]);
 }
 
 /** Save the name/contact fields of the account's current student or trainer record. */

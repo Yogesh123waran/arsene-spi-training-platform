@@ -598,3 +598,61 @@ test("generated codes: no manual code input remains in either dialog; both show 
   const actions = code("src/services/invitations.actions.ts");
   assert.doesNotMatch(actions, /studentCode|trainerCode|student_code|trainer_code/, "the actions never forward a code");
 });
+
+// ---------------------------------------------------------------- P3.12: invite a Super Admin
+test("P3.12 action: inviteSuperAdminAction fixes the role to admin and forwards only the name and email", async () => {
+  const { actions, service, cache, cleanup } = await loadActions();
+  try {
+    service.control.next = { kind: "sent", invitationId: ID, attempt: "initial" };
+    const forged = await actions.inviteSuperAdminAction({
+      role: "student", intended_role: "trainer", email: "new.admin@x.test", fullName: "New Admin", batchId: ID,
+      studentCode: "S1", trainerCode: "T1", phone: "1", organization: "O", designation: "D", specializations: ["x"], invited_by: USER, expiresInDays: 30,
+    });
+    await actions.inviteSuperAdminAction("not an object");
+    await actions.inviteSuperAdminAction(null);
+    const [sa, junk1, junk2] = service.received.map((r) => r.input);
+    assert.deepEqual(sa, { role: "admin", email: "new.admin@x.test", fullName: "New Admin" }, "role fixed server-side; nothing else forwarded");
+    for (const input of [junk1, junk2]) assert.deepEqual(Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)), { role: "admin" });
+    assert.deepEqual(forged, { status: "outcome", outcome: { kind: "sent", invitationId: ID, attempt: "initial" }, message: I.invitationOutcomeMessage({ kind: "sent", invitationId: ID, attempt: "initial" }) });
+    assert.deepEqual(cache.calls.slice(0, 3), ["/admin/students", "/admin/trainers", "/admin/users"], "user pages revalidated after a sent invitation");
+  } finally {
+    cleanup();
+  }
+});
+
+test("P3.12 action: refusals and errors stay safe (authorization message kept; duplicates as outcomes; raw errors generic, name-only logs)", async () => {
+  const { actions, service, cleanup } = await loadActions();
+  try {
+    service.control.next = async () => { throw new service.InvitationsAuthorizationError(); };
+    assert.deepEqual(await actions.inviteSuperAdminAction({ email: "a@x.test", fullName: "A" }), { status: "error", error: "Only Super Admins can send invitations." });
+    const dup = { kind: "refused", stage: "create", reason: "already_invited", invitationId: null };
+    service.control.next = dup;
+    assert.deepEqual(await actions.inviteSuperAdminAction({ email: "a@x.test", fullName: "A" }), { status: "outcome", outcome: dup, message: I.invitationOutcomeMessage(dup) });
+    service.control.next = async () => { throw new Error("duplicate key (email)=(secret.admin@x.test)"); };
+    const { result, lines } = await quiet(() => actions.inviteSuperAdminAction({ email: "secret.admin@x.test", fullName: "S" }));
+    assert.deepEqual(result, { status: "error", error: I.GENERIC_INVITATION_ERROR });
+    assert.deepEqual(lines, ["[invitations.actions] inviteSuperAdmin: Error"]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("P3.12 sources: the action fixes the role; the dialog asks only name + email, warns, and requires confirmation; Users page entry", () => {
+  const actionsCode = code("src/services/invitations.actions.ts");
+  assert.match(actionsCode, /export async function inviteSuperAdminAction\(input: SuperAdminInvitationInput\): Promise<InvitationActionResult> \{\s*const a = asObject\(input\);\s*return run\("inviteSuperAdmin", \(\) =>\s*invitationsService\.inviteUser\(\{\s*role: "admin",\s*email: a\.email,\s*fullName: a\.fullName,\s*\}\)/);
+  const dialog = code("src/components/modules/InviteUserDialog.tsx");
+  assert.match(dialog, /export type InviteKind = "student" \| "trainer" \| "super_admin";/);
+  assert.match(dialog, /isSuperAdmin\s*\?\s*inviteSuperAdminAction\(\{ email: d\.email, fullName: d\.fullName \}\)/, "only name and email are sent");
+  assert.match(dialog, /if \(isSuperAdmin && !confirmed\) \{\s*setFormError\(/, "nothing is sent without the confirmation");
+  assert.match(dialog, /disabled=\{busy \|\| \(isSuperAdmin && !confirmed\)\}/, "the send button stays disabled until confirmed");
+  assert.match(dialog, /Super Admins have full administrative access\./);
+  assert.match(dialog, /name="confirmFullAccess"/);
+  assert.match(dialog, /setConfirmed\(false\);\s*\}, \[open\]\);/, "the confirmation resets every time the dialog opens");
+  // The extra fields (phone, organization, designation, batch, specializations) are not rendered for a Super Admin.
+  assert.match(dialog, /\{isSuperAdmin \? \(\s*<label[\s\S]*?\) : \(\s*<>\s*<Input name="phone"/);
+  assert.match(dialog, /\{isSuperAdmin \? null : isStudent \? \(/);
+  assert.match(code("src/components/modules/InviteUserButton.tsx"), /super_admin: "Invite Super Admin"/);
+  const page = code("src/app/admin/users/page.tsx");
+  assert.match(page, /actions=\{loadError \? undefined : <InviteUserButton kind="super_admin" \/>\}/);
+  assert.doesNotMatch(dialog + code("src/components/modules/InviteUserButton.tsx"), /role:\s*["']|SUPABASE_SERVICE_ROLE_KEY|auth\.admin|@\/repositories\//, "no client-side role authority or privileged access");
+});

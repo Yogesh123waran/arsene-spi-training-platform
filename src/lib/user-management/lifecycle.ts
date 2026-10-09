@@ -189,6 +189,43 @@ export const STATUS_REASON_MESSAGE: Record<string, string> = {
   last_super_admin: LAST_SUPER_ADMIN,
 };
 
+// -------------------------------------------------------------------
+// Remove (deactivate) a student / trainer from the Students / Trainers lists
+// -------------------------------------------------------------------
+/**
+ * "Remove" deactivates the account through admin_set_account_status (active → suspended): the person can no
+ * longer sign in and loses all data access (0016), while the Auth user, profile, student/trainer record and
+ * every training and audit record are kept. Nothing is deleted. Reactivation stays in the account panel.
+ */
+export type RemovableRole = "student" | "trainer";
+
+export const REMOVE_LABEL: Record<RemovableRole, string> = { student: "student", trainer: "trainer" };
+
+/** Kept in the audit history (user_admin_events.detail.reason) of the status change. */
+export const REMOVE_AUDIT_REASON: Record<RemovableRole, string> = {
+  student: "Removed from the Students list",
+  trainer: "Removed from the Trainers list",
+};
+
+export const REMOVE_REASON_MESSAGE: Record<string, string> = {
+  cannot_change_self: "You can't remove your own account.",
+  not_found: "That account no longer exists.",
+  unchanged: "This account has already been removed (its account is suspended).",
+  transition_not_allowed: "This account hasn't accepted its invitation yet, so it can't be removed here. Revoke its invitation from the account panel instead.",
+  never_activated: "This account was never activated.",
+  last_super_admin: LAST_SUPER_ADMIN,
+};
+
+/** The trainer's current work that must be reassigned first; null when there is none. */
+export function trainerAssignmentsMessage(counts: { batches: number; classes: number }): string | null {
+  const parts: string[] = [];
+  if (counts.batches > 0) parts.push(`${counts.batches} current batch${counts.batches === 1 ? "" : "es"} (upcoming or ongoing)`);
+  if (counts.classes > 0) parts.push(`${counts.classes} scheduled or live class${counts.classes === 1 ? "" : "es"}`);
+  if (parts.length === 0) return null;
+  // A class's trainer is always its batch's trainer (0003 trigger), so classes move only with their batch.
+  return `This trainer still has ${parts.join(" and ")}. Reassign each current batch to another trainer on its batch page first (its scheduled and live classes move with it); a class still scheduled in a batch that has already finished must be cancelled or completed on its class page. Then remove the trainer.`;
+}
+
 export const ROLE_REASON_MESSAGE: Record<string, string> = {
   cannot_change_self: "You can't change your own role.",
   not_found: "That account no longer exists.",

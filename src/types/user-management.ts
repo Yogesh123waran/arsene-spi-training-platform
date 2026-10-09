@@ -254,6 +254,15 @@ export interface TrainerInvitationInput {
   specializations?: string[];
 }
 
+/**
+ * What the Invite Super Admin dialog may send (P3.12): name and email only. The role is fixed to Super Admin on
+ * the server; no batch, code or other field is accepted.
+ */
+export interface SuperAdminInvitationInput {
+  email?: string;
+  fullName?: string;
+}
+
 /** Plain, serializable result of an invitation server action (never raw errors). */
 export type InvitationActionResult =
   | { status: "outcome"; outcome: InvitationSendOutcome; message: string }

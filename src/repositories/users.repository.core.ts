@@ -206,6 +206,29 @@ export function createUsersRepository(getClient: () => Promise<Client | null>, o
       return rows?.[0] ?? null;
     },
 
+    /**
+     * The trainer's CURRENT work (Remove trainer): batches they run that are still upcoming or ongoing — the
+     * only batches a Super Admin can reassign to another trainer — and their scheduled or live classes. Completed
+     * and cancelled batches and classes are history and never block. Exact database counts (no rows sent).
+     */
+    async countTrainerAssignments(trainerId: string): Promise<{ batches: number; classes: number }> {
+      const supabase = await client("countTrainerAssignments");
+      try {
+        const [batches, classes] = await Promise.all([
+          supabase.from("batches").select("id", { count: "exact", head: true }).eq("trainer_id", trainerId).in("status", ["upcoming", "ongoing"]),
+          supabase.from("classes").select("id", { count: "exact", head: true }).eq("trainer_id", trainerId).in("status", ["scheduled", "live"]),
+        ]);
+        for (const r of [batches, classes]) {
+          if (r.error) throw r.error;
+          if (typeof r.count !== "number") throw new Error("no count");
+        }
+        return { batches: batches.count as number, classes: classes.count as number };
+      } catch (err) {
+        logDbError("countTrainerAssignments", err);
+        throw new UsersRepositoryError();
+      }
+    },
+
     setAccountStatus(userId: string, status: AccountStatusColumn, reason: string | null): Promise<UsersFunctionOutcome> {
       return call("setAccountStatus", (s) => s.rpc("admin_set_account_status", { p_user_id: userId, p_status: status, p_reason: reason }));
     },

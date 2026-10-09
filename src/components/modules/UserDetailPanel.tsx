@@ -401,13 +401,19 @@ function InvitationSection({ detail }: { detail: UserDetail }) {
  * function decides — these controls are only shown when that function
  * could accept them, never as the authorization.
  */
-export function UserDetailPanel({ detail, closeHref }: { detail: UserDetail; closeHref: string }) {
+/**
+ * `initialEdit` (P3.11-C, from `?edit=details`): open the details form at once — only when the panel itself
+ * offers editing (a present record for the account's current role). Saving goes through the same server action;
+ * editing never changes the account's status or role.
+ */
+export function UserDetailPanel({ detail, closeHref, initialEdit = false }: { detail: UserDetail; closeHref: string; initialEdit?: boolean }) {
   const [statusTarget, setStatusTarget] = useState<"active" | "suspended" | null>(null);
   const [roleOpen, setRoleOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
   const u = detail.user;
   const a = detail.actions;
-  useEffect(() => setEditing(false), [u.id]);
+  const canStartEditing = initialEdit && a.editDetails && detail.contact !== null;
+  const [editing, setEditing] = useState(canStartEditing);
+  useEffect(() => setEditing(canStartEditing), [u.id]); // eslint-disable-line react-hooks/exhaustive-deps -- reset per account only
 
   return (
     <Card aria-label={`Account ${u.name ?? u.id}`}>

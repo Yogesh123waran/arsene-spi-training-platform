@@ -52,6 +52,16 @@ export interface StudentSummary {
   performance?: number;
   status: UserStatus;
   /**
+   * The account's status (profiles.account_status) when the caller may read the profile (Super Admin);
+   * "suspended" = removed / deactivated (P3.11-B). Undefined when unreadable (e.g. the trainer view) or in demo mode.
+   */
+  accountStatus?: "active" | "invited" | "suspended";
+  /**
+   * The account's current role (profiles.role) when readable (Super Admin), P3.11-D. A row whose role is no
+   * longer "student" is a stale student record (role changed): it is not offered the Super Admin "Edit".
+   */
+  accountRole?: "super_admin" | "trainer" | "student";
+  /**
    * Trainer list only (P3.10-B), computed server-side: the trainer may edit this student
    * (enrolled in an upcoming/ongoing batch they run). A UI hint — the database decides.
    */

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Search, MoreHorizontal, Eye, Pencil, Trash2 } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
@@ -18,16 +19,38 @@ import { Badge } from "@/components/ui/Badge";
 import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { Pagination } from "@/components/ui/Pagination";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { useToast } from "@/components/ui/Toast";
+import { RemoveAccountDialog } from "@/components/modules/RemoveAccountDialog";
+import { DEFAULT_USER_FILTERS, userDetailHref, userEditDetailsHref } from "@/lib/user-management/users";
 import type { TrainerSummary } from "@/types/trainer";
 
 const PAGE_SIZE = 5;
+/** The Super Admin Users page; `?user=<id>` opens the account panel (trainers.id is the account id). */
+const ADMIN_USERS_PATH = "/admin/users";
+
+/** A removed (deactivated) account shows as Suspended, whatever its record status (P3.11-B). */
+function displayStatus(t: TrainerSummary): string {
+  return t.accountStatus === "suspended" ? "suspended" : t.status;
+}
+
+/**
+ * "Edit trainer" only for an account whose current role is trainer (P3.11-C): a stale trainer record (role since
+ * changed) would open the account's OTHER record in the panel, so it gets View profile only.
+ */
+function canEditAsTrainer(t: TrainerSummary): boolean {
+  return t.accountRole === "trainer";
+}
+
+/** Remove is offered only where it can succeed: an active account (invited/suspended are refused). */
+function canRemove(t: TrainerSummary): boolean {
+  return t.accountStatus !== "suspended" && t.accountStatus !== "invited";
+}
 
 export function TrainersTable({ rows }: { rows: TrainerSummary[] }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(1);
-  const { showToast } = useToast();
+  const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null);
+  const router = useRouter();
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
@@ -35,7 +58,7 @@ export function TrainersTable({ rows }: { rows: TrainerSummary[] }) {
         query.trim() === "" ||
         r.name.toLowerCase().includes(query.toLowerCase()) ||
         r.email.toLowerCase().includes(query.toLowerCase());
-      const matchesStatus = status === "all" || r.status === status;
+      const matchesStatus = status === "all" || displayStatus(r) === status;
       return matchesQuery && matchesStatus;
     });
   }, [rows, query, status]);
@@ -43,9 +66,6 @@ export function TrainersTable({ rows }: { rows: TrainerSummary[] }) {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  function notImplemented(action: string) {
-    showToast({ variant: "info", title: `${action} isn't wired up yet`, description: "This UI pass is presentation-only." });
-  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -74,6 +94,7 @@ export function TrainersTable({ rows }: { rows: TrainerSummary[] }) {
             { label: "Active", value: "active" },
             { label: "Invited", value: "invited" },
             { label: "Inactive", value: "inactive" },
+            { label: "Suspended (removed)", value: "suspended" },
           ]}
         />
       </div>
@@ -120,7 +141,7 @@ export function TrainersTable({ rows }: { rows: TrainerSummary[] }) {
                 <TableCell>{t.batches.length > 0 ? t.batches.join(", ") : <span className="text-xs text-ink-faint">—</span>}</TableCell>
                 <TableCell>{t.students}</TableCell>
                 <TableCell>
-                  <StatusBadge status={t.status} />
+                  <StatusBadge status={displayStatus(t)} />
                 </TableCell>
                 <TableCell className="text-right">
                   <Dropdown
@@ -134,15 +155,22 @@ export function TrainersTable({ rows }: { rows: TrainerSummary[] }) {
                       </button>
                     }
                   >
-                    <DropdownItem onClick={() => notImplemented("View profile")}>
+                    {/* P3.11-C: the trainer's existing account panel on the Users page (the server re-checks Super Admin). */}
+                    <DropdownItem onClick={() => router.push(userDetailHref(ADMIN_USERS_PATH, DEFAULT_USER_FILTERS, t.id))}>
                       <Eye className="h-3.5 w-3.5" /> View profile
                     </DropdownItem>
-                    <DropdownItem onClick={() => notImplemented("Edit trainer")}>
-                      <Pencil className="h-3.5 w-3.5" /> Edit
-                    </DropdownItem>
-                    <DropdownItem onClick={() => notImplemented("Remove trainer")} className="text-signal-red">
-                      <Trash2 className="h-3.5 w-3.5" /> Remove
-                    </DropdownItem>
+                    {canEditAsTrainer(t) && (
+                      <DropdownItem onClick={() => router.push(userEditDetailsHref(ADMIN_USERS_PATH, DEFAULT_USER_FILTERS, t.id))}>
+                        <Pencil className="h-3.5 w-3.5" /> Edit
+                      </DropdownItem>
+                    )}
+                    {/* P3.11-B: Remove deactivates the account after confirmation (nothing is deleted); the server refuses
+                        while the trainer still has current batches or scheduled/live classes. */}
+                    {canRemove(t) && (
+                      <DropdownItem onClick={() => setRemoveTarget({ id: t.id, name: t.name })} className="text-signal-red">
+                        <Trash2 className="h-3.5 w-3.5" /> Remove
+                      </DropdownItem>
+                    )}
                   </Dropdown>
                 </TableCell>
               </TableRow>
@@ -152,6 +180,8 @@ export function TrainersTable({ rows }: { rows: TrainerSummary[] }) {
       )}
 
       <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+
+      <RemoveAccountDialog kind="trainer" target={removeTarget} onClose={() => setRemoveTarget(null)} />
     </div>
   );
 }

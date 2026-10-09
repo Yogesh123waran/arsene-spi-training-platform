@@ -2,17 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, ShieldAlert, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { Select } from "@/components/ui/Select";
 import { useToast } from "@/components/ui/Toast";
 import { createRefusalField, outcomeTone, resendGuidance, type OutcomeTone } from "@/lib/user-management/invitations";
-import { inviteStudentAction, inviteTrainerAction, resendInvitationAction } from "@/services/invitations.actions";
+import { inviteStudentAction, inviteSuperAdminAction, inviteTrainerAction, resendInvitationAction } from "@/services/invitations.actions";
 import type { InvitationActionResult, InvitationSendOutcome } from "@/types/user-management";
 
-export type InviteKind = "student" | "trainer";
+export type InviteKind = "student" | "trainer" | "super_admin";
 
 export interface InviteBatchOption {
   id: string;
@@ -51,6 +51,10 @@ function resultHint(o: InvitationSendOutcome): string | null {
  * pending transition, a submitting ref (for a second Enter/click before
  * React re-renders), and by switching to the result view as soon as an
  * invitation exists — the same form is never submitted twice.
+ *
+ * P3.12 "super_admin": name and email only, a full-access warning, and an
+ * explicit confirmation that must be ticked before anything is sent. The
+ * Super Admin role is fixed by inviteSuperAdminAction on the server.
  */
 export function InviteUserDialog({
   kind,
@@ -73,6 +77,7 @@ export function InviteUserDialog({
   const [result, setResult] = useState<{ outcome: InvitationSendOutcome; message: string } | null>(null);
   const [resendAt, setResendAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const [confirmed, setConfirmed] = useState(false);
 
   // Fresh dialog every time it opens.
   useEffect(() => {
@@ -82,6 +87,7 @@ export function InviteUserDialog({
     setFormError(null);
     setResult(null);
     setResendAt(null);
+    setConfirmed(false);
   }, [open]);
 
   // Countdown for an allowed resend.
@@ -92,7 +98,8 @@ export function InviteUserDialog({
   }, [resendAt]);
 
   const isStudent = kind === "student";
-  const noun = isStudent ? "student" : "trainer";
+  const isSuperAdmin = kind === "super_admin";
+  const noun = isStudent ? "student" : isSuperAdmin ? "Super Admin" : "trainer";
   const busy = isPending || submitting.current;
 
   function close() {
@@ -111,7 +118,9 @@ export function InviteUserDialog({
       showToast({
         variant: "success",
         title: res.message,
-        description: `${code ? `${isStudent ? "Student" : "Trainer"} Code: ${code}. ` : ""}The ${noun} will appear in ${isStudent ? "Students" : "Trainers"} after accepting the invitation; until then the account is listed under Users as invited.`,
+        description: isSuperAdmin
+          ? "The new Super Admin gets full administrative access after accepting the invitation; until then the account is listed under Users as invited."
+          : `${code ? `${isStudent ? "Student" : "Trainer"} Code: ${code}. ` : ""}The ${noun} will appear in ${isStudent ? "Students" : "Trainers"} after accepting the invitation; until then the account is listed under Users as invited.`,
       });
       router.refresh();
       onClose();
@@ -153,9 +162,15 @@ export function InviteUserDialog({
 
   function submit() {
     if (result) return; // the same form is never sent twice
+    if (isSuperAdmin && !confirmed) {
+      setFormError("Confirm that this person should have full administrative access before sending the invitation.");
+      return;
+    }
     const d = draft;
     guarded(() =>
-      isStudent
+      isSuperAdmin
+        ? inviteSuperAdminAction({ email: d.email, fullName: d.fullName })
+        : isStudent
         ? inviteStudentAction({
             email: d.email,
             fullName: d.fullName,
@@ -214,7 +229,7 @@ export function InviteUserDialog({
           <Icon className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
           <div className="flex flex-col gap-1">
             <p>{result.message}</p>
-            {code && (
+            {code && !isSuperAdmin && (
               <p>
                 {isStudent ? "Student" : "Trainer"} Code: <span className="font-mono font-semibold">{code}</span>
               </p>
@@ -234,15 +249,25 @@ export function InviteUserDialog({
       isOpen
       onClose={close}
       size="lg"
-      title={isStudent ? "Invite a student" : "Invite a trainer"}
-      description={`An invitation email is sent to this address and a ${noun} code is assigned automatically. The ${noun} sets a password when accepting it; until then the account is listed under Users as invited.`}
+      title={isStudent ? "Invite a student" : isSuperAdmin ? "Invite a Super Admin" : "Invite a trainer"}
+      description={
+        isSuperAdmin
+          ? "An invitation email is sent to this address. The new Super Admin sets a password when accepting it; until then the account is listed under Users as invited."
+          : `An invitation email is sent to this address and a ${noun} code is assigned automatically. The ${noun} sets a password when accepting it; until then the account is listed under Users as invited.`
+      }
       footer={
         <>
           <Button variant="secondary" onClick={close} disabled={busy}>
             Cancel
           </Button>
-          <Button type="submit" form="invite-user-form" isLoading={isPending} disabled={busy}>
-            Send invitation
+          <Button
+            type="submit"
+            form="invite-user-form"
+            variant={isSuperAdmin ? "danger" : "primary"}
+            isLoading={isPending}
+            disabled={busy || (isSuperAdmin && !confirmed)}
+          >
+            {isSuperAdmin ? "Send Super Admin invitation" : "Send invitation"}
           </Button>
         </>
       }
@@ -254,7 +279,7 @@ export function InviteUserDialog({
           e.preventDefault();
           submit();
         }}
-        aria-label={isStudent ? "Invite a student" : "Invite a trainer"}
+        aria-label={isStudent ? "Invite a student" : isSuperAdmin ? "Invite a Super Admin" : "Invite a trainer"}
         aria-busy={busy}
       >
         {formError && (
@@ -262,12 +287,40 @@ export function InviteUserDialog({
             {formError}
           </p>
         )}
+        {isSuperAdmin && (
+          <div className="flex items-start gap-3 rounded border border-signal-red/30 bg-signal-redSoft px-3 py-3 text-sm text-ink sm:col-span-2" role="note">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-signal-red" aria-hidden />
+            <div className="flex flex-col gap-1">
+              <p className="font-semibold">Super Admins have full administrative access.</p>
+              <p className="text-ink-muted">
+                After accepting, this person can manage every user (invite, suspend, change roles), every batch, class, test and
+                certificate, and all training records. Invite only someone who must administer the whole platform.
+              </p>
+            </div>
+          </div>
+        )}
         <Input name="email" type="email" label="Email" value={draft.email} onChange={set("email")} error={fieldErrors.email} maxLength={254} required disabled={busy} autoComplete="off" />
         <Input name="fullName" label="Full name" value={draft.fullName} onChange={set("fullName")} maxLength={200} required disabled={busy} />
-        <Input name="phone" label="Phone (optional)" value={draft.phone} onChange={set("phone")} maxLength={40} disabled={busy} />
-        <Input name="organization" label="Organization (optional)" value={draft.organization} onChange={set("organization")} maxLength={200} disabled={busy} />
-        <Input name="designation" label="Designation (optional)" value={draft.designation} onChange={set("designation")} maxLength={200} disabled={busy} />
-        {isStudent ? (
+        {isSuperAdmin ? (
+          <label className="flex items-start gap-2 text-sm text-ink sm:col-span-2">
+            <input
+              type="checkbox"
+              name="confirmFullAccess"
+              checked={confirmed}
+              onChange={(e) => setConfirmed(e.target.checked)}
+              disabled={busy}
+              className="mt-0.5 h-4 w-4 rounded border-surface-border"
+            />
+            <span>I confirm that {draft.fullName.trim() || "this person"} should become a Super Admin with full administrative access.</span>
+          </label>
+        ) : (
+          <>
+            <Input name="phone" label="Phone (optional)" value={draft.phone} onChange={set("phone")} maxLength={40} disabled={busy} />
+            <Input name="organization" label="Organization (optional)" value={draft.organization} onChange={set("organization")} maxLength={200} disabled={busy} />
+            <Input name="designation" label="Designation (optional)" value={draft.designation} onChange={set("designation")} maxLength={200} disabled={busy} />
+          </>
+        )}
+        {isSuperAdmin ? null : isStudent ? (
           <>
             <div className="sm:col-span-2">
               <Select

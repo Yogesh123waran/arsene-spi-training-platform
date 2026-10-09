@@ -21,8 +21,13 @@ import type { UserDetail, UserListPage } from "@/types/user-management";
 import { USERS_PAGE_SIZE, buildUserListPage, parseUserListFilters } from "@/lib/user-management/users";
 import {
   DETAILS_REASON_MESSAGE,
+  REMOVE_AUDIT_REASON,
+  REMOVE_LABEL,
+  REMOVE_REASON_MESSAGE,
   ROLE_REASON_MESSAGE,
   STATUS_REASON_MESSAGE,
+  trainerAssignmentsMessage,
+  type RemovableRole,
   buildDetailsPatch,
   buildRoleDetails,
   errorCodeMessage,
@@ -106,6 +111,30 @@ export function createUsersService(deps: UsersServiceDeps) {
     return mapUserDetail(record, audit, viewer.id, latest, invitation, deps.now?.() ?? new Date());
   }
 
+  /**
+   * Remove = deactivate (P3.11-B): active → suspended through admin_set_account_status — never a deletion.
+   * The target's role is read from the database (never taken from the browser) and must be the list's role;
+   * a trainer with current batches or scheduled/live classes is refused until they are reassigned. The
+   * database function re-checks Super Admin, self, the last active Super Admin and the transition.
+   */
+  async function removeAccount(kind: RemovableRole, userId: unknown): Promise<string> {
+    const viewer = await requireSuperAdmin(`Only Super Admins can remove ${REMOVE_LABEL[kind]}s.`);
+    requireActions();
+    const id = targetId(userId);
+    if (id === viewer.id) throw new UsersActionError(REMOVE_REASON_MESSAGE.cannot_change_self ?? "You can't remove your own account.");
+    const record = await deps.repository.getProfile(id);
+    if (!record) throw new UsersActionError(REMOVE_REASON_MESSAGE.not_found ?? "That account no longer exists.");
+    if (record.role !== kind) throw new UsersActionError(`This account is not a ${REMOVE_LABEL[kind]}, so it can't be removed from this list.`);
+    if (kind === "trainer") {
+      const blocked = trainerAssignmentsMessage(await deps.repository.countTrainerAssignments(id));
+      if (blocked) throw new UsersActionError(blocked);
+    }
+    await perform(() => deps.repository.setAccountStatus(id, "suspended", REMOVE_AUDIT_REASON[kind]), REMOVE_REASON_MESSAGE);
+    return kind === "student"
+      ? "Student removed. Their account is deactivated and they can no longer sign in; their training records are kept."
+      : "Trainer removed. Their account is deactivated and they can no longer sign in; their records and authored content are kept.";
+  }
+
   return {
     /** One page of users for the given URL search params. */
     async listUsers(searchParams: SearchParams | null | undefined): Promise<UserListPage> {
@@ -133,6 +162,16 @@ export function createUsersService(deps: UsersServiceDeps) {
       if (!why.ok) throw new UsersActionError(why.error);
       await perform(() => deps.repository.setAccountStatus(id, target.value, why.value), STATUS_REASON_MESSAGE);
       return target.value === "suspended" ? "Account suspended. The user can no longer sign in." : "Account reactivated.";
+    },
+
+    /** Remove a student from the Students list: deactivate the account; every record is kept. */
+    removeStudent(userId: unknown): Promise<string> {
+      return removeAccount("student", userId);
+    },
+
+    /** Remove a trainer from the Trainers list once no current batch or scheduled/live class is assigned to them. */
+    removeTrainer(userId: unknown): Promise<string> {
+      return removeAccount("trainer", userId);
     },
 
     /**

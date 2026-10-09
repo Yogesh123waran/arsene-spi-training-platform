@@ -57,9 +57,24 @@ const DEMO_TRAINER_BATCHES = ["Batch A"];
  */
 const STUDENT_LIST_SELECT = `
   id, full_name, status,
+  profiles!students_id_fkey ( account_status, role ),
   student_details ( email ),
   batch_students ( enrollment_status, batches ( name, status, trainer_id, courses ( title ) ) )
 `;
+
+type ProfileEmbed = { account_status: string; role: string } | { account_status: string; role: string }[] | null | undefined;
+
+/** profiles.account_status when readable (Super Admin), else undefined (P3.11-B). */
+function accountStatusOf(profile: ProfileEmbed): StudentSummary["accountStatus"] {
+  const value = (Array.isArray(profile) ? profile[0] : profile)?.account_status;
+  return value === "active" || value === "invited" || value === "suspended" ? value : undefined;
+}
+
+/** profiles.role when readable (Super Admin), else undefined (P3.11-D). */
+function accountRoleOf(profile: ProfileEmbed): StudentSummary["accountRole"] {
+  const value = (Array.isArray(profile) ? profile[0] : profile)?.role;
+  return value === "super_admin" || value === "trainer" || value === "student" ? value : undefined;
+}
 
 /** Sorted, de-duplicated, non-empty strings joined for display — or "—". */
 function joinOrDash(values: (string | null | undefined)[]): string {
@@ -105,6 +120,8 @@ export const studentsRepository = {
           course: joinOrDash(current.map((b) => b.courses?.title)),
           // attendance / performance: no data source yet — left undefined ("—").
           status: row.status,
+          accountStatus: accountStatusOf(row.profiles),
+          accountRole: accountRoleOf(row.profiles),
           // P3.10-B: the trainer may edit only a student enrolled in an upcoming/ongoing batch they run —
           // the same scope trainer_update_student checks (a hint for the UI; the database decides).
           editable: scope.kind === "trainer" && current.some((b) => (EDITABLE_BATCH_STATUSES as readonly string[]).includes(b.status)),
