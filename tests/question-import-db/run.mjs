@@ -109,6 +109,10 @@ try {
     "src/lib/dashboard/admin-dashboard.ts",
     "src/lib/dashboard/analytics.ts",
     "src/repositories/dashboard.repository.core.ts",
+    // Trainer dashboard reads (Phase 7 P4.2)
+    "src/lib/dashboard/trainer-dashboard.ts",
+    "src/repositories/trainer-dashboard.repository.core.ts",
+    "src/services/trainer-dashboard.service.core.ts",
   ];
   for (const rel of sources) {
     const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {

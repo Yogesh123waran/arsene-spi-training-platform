@@ -4,6 +4,8 @@
 // grants and the 0013 functions behave as they do behind PostgREST.
 // Supports exactly what question-import.repository.core.ts uses:
 //   rpc(fn, args) · from(table).select(cols) · eq · in · gt · gte · lte · order · limit · maybeSingle
+// plus range(from, to) and several order() calls, applied in sequence as PostgREST does
+// (trainer-dashboard.repository.core.ts pages on a multi-column order).
 // plus PostgREST resource embedding in select (users.repository.core.ts):
 //   "id, students!students_id_fkey ( code, student_details ( email ) )"
 // resolved from the real foreign keys like PostgREST does (to-one → object or
@@ -201,8 +203,9 @@ class Builder {
     this.client = client;
     this.spec = spec;
     this.filters = [];
-    this.orderBy = null;
+    this.orders = [];
     this.limitN = null;
+    this.offsetN = null;
     this.single = false;
   }
   eq(col, v) { this.filters.push(`${ident(col)} = ${lit(v)}`); return this; }
@@ -210,14 +213,15 @@ class Builder {
   gte(col, v) { this.filters.push(`${ident(col)} >= ${lit(v)}`); return this; }
   lte(col, v) { this.filters.push(`${ident(col)} <= ${lit(v)}`); return this; }
   in(col, values) { this.filters.push(values.length ? `${ident(col)} in (${values.map(lit).join(", ")})` : "false"); return this; }
-  order(col, opts = {}) { this.orderBy = `${ident(col)} ${opts.ascending === false ? "desc" : "asc"}`; return this; }
+  order(col, opts = {}) { this.orders.push(`${ident(col)} ${opts.ascending === false ? "desc" : "asc"}`); return this; }
   limit(n) { this.limitN = n; return this; }
+  range(from, to) { this.offsetN = from; this.limitN = to - from + 1; return this; }
   maybeSingle() { this.single = true; return this; }
 
   toSql(fks = null) {
     const where = this.filters.length ? ` where ${this.filters.join(" and ")}` : "";
-    const order = this.orderBy ? ` order by ${this.orderBy}` : "";
-    const limit = this.limitN !== null ? ` limit ${Number(this.limitN)}` : "";
+    const order = this.orders.length ? ` order by ${this.orders.join(", ")}` : "";
+    const limit = (this.limitN !== null ? ` limit ${Number(this.limitN)}` : "") + (this.offsetN !== null ? ` offset ${Number(this.offsetN)}` : "");
     const { spec } = this;
     if (spec.kind === "select" && fks) {
       let n = 0;
