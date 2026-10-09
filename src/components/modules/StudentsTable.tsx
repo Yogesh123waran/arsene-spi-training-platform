@@ -156,9 +156,12 @@ export function StudentsTable({ rows, trainerEdit = false }: { rows: StudentSumm
                         <Pencil className="h-3.5 w-3.5" /> Edit student
                       </DropdownItem>
                     ) : null}
-                    <DropdownItem onClick={() => notImplemented("Remove student")} className="text-signal-red">
-                      <Trash2 className="h-3.5 w-3.5" /> Remove
-                    </DropdownItem>
+                    {/* P3.10-C: trainers have no remove/deactivate authority, so the trainer menu has no Remove. */}
+                    {!trainerEdit && (
+                      <DropdownItem onClick={() => notImplemented("Remove student")} className="text-signal-red">
+                        <Trash2 className="h-3.5 w-3.5" /> Remove
+                      </DropdownItem>
+                    )}
                   </Dropdown>
                 </TableCell>
               </TableRow>
