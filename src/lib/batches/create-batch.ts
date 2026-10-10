@@ -61,7 +61,7 @@ export function validateCreateBatchInput(
   const course = options.courses.find((c) => c.id === courseId);
   if (!courseId) errors.courseId = "Select a course.";
   else if (!course) errors.courseId = "Select a valid course.";
-  else if (!course.selectable) errors.courseId = "This course isn't published, so a batch can't be created for it.";
+  else if (!course.selectable) errors.courseId = "This course isn't active, so a batch can't be created for it.";
 
   if (trainerId) {
     const trainer = options.trainers.find((t) => t.id === trainerId);
@@ -88,7 +88,7 @@ export function validateCreateBatchInput(
 /** A repository failure the create flow understands. */
 export interface BatchInsertFailure {
   /** "duplicate_code": the batch code already exists (unique constraint). */
-  kind: "duplicate_code" | "invalid_reference" | "rejected" | "permission" | "unavailable" | "trainer_unavailable";
+  kind: "duplicate_code" | "invalid_reference" | "rejected" | "permission" | "unavailable" | "trainer_unavailable" | "course_unavailable";
 }
 
 /**
@@ -97,12 +97,14 @@ export interface BatchInsertFailure {
  * key (course/trainer gone) · 23514/23502/22007/22008 check, not-null or
  * date · 42501 RLS / permission. Anything else is unexpected. The 0021
  * guard refuses an unavailable trainer with 23514 + hint
- * "trainer_not_available" (checked first).
+ * "trainer_not_available", and the 0030 guard a course that isn't
+ * published with 23514 + hint "course_not_published" (both checked first).
  */
 export function classifyBatchInsertError(error: unknown): BatchInsertFailure["kind"] | null {
   const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code ?? "") : "";
   const hint = error && typeof error === "object" && "hint" in error ? String((error as { hint?: unknown }).hint ?? "") : "";
   if (code === "23514" && hint === "trainer_not_available") return "trainer_unavailable";
+  if (code === "23514" && hint === "course_not_published") return "course_unavailable";
   if (code === "23505") return "duplicate_code";
   if (code === "23503") return "invalid_reference";
   if (code === "23514" || code === "23502" || code === "22007" || code === "22008") return "rejected";
@@ -141,6 +143,10 @@ export async function createBatchWith(deps: CreateBatchDeps, input: Partial<Crea
       case "trainer_unavailable":
         throw new BatchCreateValidationError({
           trainerId: "This trainer isn't available (an active trainer with an active account is required). Choose another trainer or leave it unassigned.",
+        });
+      case "course_unavailable":
+        throw new BatchCreateValidationError({
+          courseId: "This course isn't active (it may have been deactivated or moved back to draft). Choose an active course.",
         });
       case "invalid_reference":
         throw new BatchCreateValidationError({ form: "The selected course or trainer no longer exists. Reload the page and try again." });

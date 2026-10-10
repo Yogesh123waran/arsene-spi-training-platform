@@ -63,11 +63,12 @@ do $act$ begin
 end $act$;
 insert into public.trainers (id, trainer_code, full_name) values (t.id('T1'), 'T1', 'Trainer One'), (t.id('T2'), 'T2', 'Trainer Two'), (t.id('T3'), 'T3', 'Trainer Three');
 insert into public.students (id, student_code, full_name) values (t.id('ST1'), 'ST1', 'Student One');
-insert into public.courses (id, course_code, title, level) values
-  (t.id('C1'), 'SPI-101', 'Instrumentation Fundamentals', 'foundation'),
-  (t.id('C2'), 'SPI-201', 'Control Systems', 'foundation'),
-  (t.id('C3'), 'SPI-301', 'Legacy Course', 'foundation'),
-  (t.id('C9'), 'SPI-900', 'Scale Course', 'foundation');
+-- Published: batches are created for published courses only (0030 guard on client inserts).
+insert into public.courses (id, course_code, title, level, status) values
+  (t.id('C1'), 'SPI-101', 'Instrumentation Fundamentals', 'foundation', 'published'),
+  (t.id('C2'), 'SPI-201', 'Control Systems', 'foundation', 'published'),
+  (t.id('C3'), 'SPI-301', 'Legacy Course', 'foundation', 'published'),
+  (t.id('C9'), 'SPI-900', 'Scale Course', 'foundation', 'published');
 insert into public.modules (id, course_id, module_code, title, sequence) values
   (t.id('M1'), t.id('C1'), 'M1', 'Basics', 1), (t.id('M2'), t.id('C2'), 'M1', 'Loops', 1), (t.id('M3'), t.id('C1'), 'M2', 'Advanced', 2);
 insert into public.batches (batch_code, course_id, trainer_id, name, start_date, end_date, status, max_seats) values

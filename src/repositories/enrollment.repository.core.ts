@@ -50,6 +50,8 @@ export interface BatchHeaderRecord {
   max_seats: number;
   trainer_id: string | null;
   course: string;
+  /** draft / published / archived (null when the course isn't readable). */
+  course_status: string | null;
   trainer_name: string | null;
 }
 
@@ -175,12 +177,12 @@ export function createEnrollmentRepository(getClient: () => Promise<Client | nul
       const row = await read("getBatchHeader", (s) =>
         s
           .from("batches")
-          .select("id, batch_code, name, status, start_date, end_date, max_seats, trainer_id, courses ( title ), trainers ( full_name )")
+          .select("id, batch_code, name, status, start_date, end_date, max_seats, trainer_id, courses ( title, status ), trainers ( full_name )")
           .eq("id", batchId)
           .maybeSingle()
       );
       if (!row) return null;
-      const r = row as unknown as Omit<BatchHeaderRecord, "course" | "trainer_name"> & { courses: unknown; trainers: unknown };
+      const r = row as unknown as Omit<BatchHeaderRecord, "course" | "course_status" | "trainer_name"> & { courses: unknown; trainers: unknown };
       return {
         id: r.id,
         batch_code: r.batch_code,
@@ -191,6 +193,7 @@ export function createEnrollmentRepository(getClient: () => Promise<Client | nul
         max_seats: r.max_seats,
         trainer_id: r.trainer_id,
         course: one(r.courses as { title?: string } | null)?.title ?? "",
+        course_status: one(r.courses as { status?: string } | null)?.status ?? null,
         trainer_name: one(r.trainers as { full_name?: string } | null)?.full_name ?? null,
       };
     },

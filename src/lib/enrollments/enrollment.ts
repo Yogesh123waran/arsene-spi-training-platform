@@ -75,6 +75,7 @@ export const ENROLLMENT_REASON_MESSAGE: Record<string, string> = {
   transition_not_allowed: "That change isn't allowed for this enrolment (a completed enrolment is final; trainers can only add new students).",
   batch_cancelled: "This batch is cancelled; its enrolments can't be changed.",
   batch_not_current: "Students can only be enrolled into upcoming or ongoing batches.",
+  course_archived: "This batch hasn't started and its course is inactive, so it takes no new students. Ongoing batches of inactive courses still accept enrolments.",
   batch_full: "This batch is full.",
   not_found: "That batch or student no longer exists. Reload the page.",
   student_not_available: "This student can't be enrolled — an active student record with an active account is required.",
@@ -113,6 +114,14 @@ export interface EnrollmentActions {
 const NONE: EnrollmentActions = { enrol: false, reEnrol: false, withdraw: false, complete: false };
 const CURRENT = (s: unknown) => s === "upcoming" || s === "ongoing";
 
+/** 0030: an upcoming batch of an archived course takes no new students (ongoing batches still do). */
+export function isEnrolmentClosedForCourse(batchStatus: unknown, courseStatus: unknown): boolean {
+  return batchStatus === "upcoming" && courseStatus === "archived";
+}
+
+export const ENROLMENT_CLOSED_NOTE =
+  "This batch hasn't started and its course is inactive, so it takes no new students. Students already enrolled stay; withdrawals still work. Reactivate the course to reopen enrolment.";
+
 /**
  * Actions for one student in one batch.
  *   Super Admin: enrol (no enrolment) and re-enrol (withdrawn) in
@@ -120,12 +129,21 @@ const CURRENT = (s: unknown) => s === "upcoming" || s === "ongoing";
  *     complete in ongoing/completed batches (not before the batch starts —
  *     a UI rule, G3); nothing in a cancelled batch; completed is final.
  *   Trainer: enrol a new student into an upcoming/ongoing batch only.
+ *   0030: an UPCOMING batch of an ARCHIVED course takes no new or returning
+ *     students (enrol / re-enrol off; withdraw and the rest unchanged) —
+ *     the same rule the database enforces (reason course_archived).
  */
-export function enrollmentActions(role: "admin" | "trainer", batchStatus: unknown, enrollmentStatus: EnrollmentStatus | null): EnrollmentActions {
+export function enrollmentActions(
+  role: "admin" | "trainer",
+  batchStatus: unknown,
+  enrollmentStatus: EnrollmentStatus | null,
+  courseStatus?: unknown
+): EnrollmentActions {
   if (!(BATCH_STATUSES as readonly unknown[]).includes(batchStatus) || batchStatus === "cancelled") return NONE;
-  if (role === "trainer") return { ...NONE, enrol: enrollmentStatus === null && CURRENT(batchStatus) };
-  if (enrollmentStatus === null) return { ...NONE, enrol: CURRENT(batchStatus) };
-  if (enrollmentStatus === "withdrawn") return { ...NONE, reEnrol: CURRENT(batchStatus) };
+  const open = CURRENT(batchStatus) && !isEnrolmentClosedForCourse(batchStatus, courseStatus);
+  if (role === "trainer") return { ...NONE, enrol: enrollmentStatus === null && open };
+  if (enrollmentStatus === null) return { ...NONE, enrol: open };
+  if (enrollmentStatus === "withdrawn") return { ...NONE, reEnrol: open };
   if (enrollmentStatus === "enrolled") {
     return { ...NONE, withdraw: CURRENT(batchStatus), complete: batchStatus === "ongoing" || batchStatus === "completed" };
   }
@@ -195,4 +213,6 @@ export interface BatchEnrollmentDetail {
   /** Students that may be offered for a NEW enrolment (none when the batch can't take one). */
   candidates: EnrollmentCandidate[];
   canEnrol: boolean;
+  /** Set when enrolment is closed because the batch's course is archived (shown instead of the Enrol button). */
+  enrolmentNote?: string;
 }

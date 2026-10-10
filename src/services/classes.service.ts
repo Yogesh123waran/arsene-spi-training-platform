@@ -209,7 +209,7 @@ async function validateRelationships(
   if (!course) {
     errors.courseId = "Select a valid course.";
   } else if (changed("courseId") && !course.selectable) {
-    errors.courseId = "This course isn't open for scheduling (it isn't published).";
+    errors.courseId = "This course isn't open for scheduling (a draft, or inactive with no upcoming or ongoing batch).";
   }
 
   const batch = options.batches.find((b) => b.id === links.batchId);

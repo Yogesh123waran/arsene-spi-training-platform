@@ -82,6 +82,11 @@ export function BatchDetailView({ detail, backHref }: { detail: BatchEnrollmentD
           )}
         </CardHeader>
         <CardContent>
+          {detail.enrolmentNote && (
+            <p role="note" className="mb-3 rounded-md border border-surface-border bg-surface-sunken px-3 py-2.5 text-sm text-ink-muted">
+              {detail.enrolmentNote}
+            </p>
+          )}
           {roster.length === 0 ? (
             <EmptyState title="No students yet" description="Nobody has been enrolled in this batch." />
           ) : (

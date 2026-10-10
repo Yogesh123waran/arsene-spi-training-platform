@@ -2,6 +2,7 @@ import "server-only";
 import { authConfig } from "@/config/auth";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { mockClassFilterOptions } from "@/lib/mock/classes.mock";
+import { isCourseOpenForScheduling, isCurrentBatchStatus } from "@/lib/courses/course-availability";
 import type { ClassFilterOptions } from "@/types/class";
 
 const EMPTY_OPTIONS: ClassFilterOptions = { courses: [], modules: [], batches: [], trainers: [] };
@@ -39,12 +40,16 @@ export async function getClassFilterOptions(): Promise<ClassFilterOptions> {
     if (error) throw error;
 
     // Validity rules for scheduling (UX; the security boundary is RLS
-    // plus the class/batch-trainer trigger in the database).
+    // plus the class/batch-trainer trigger in the database). An archived
+    // course stays schedulable while it has an upcoming/ongoing batch, so
+    // archiving never interrupts training already under way (Option A).
+    const coursesWithCurrentBatch = new Set((batches.data ?? []).filter((b) => isCurrentBatchStatus(b.status)).map((b) => b.course_id));
     return {
       courses: (courses.data ?? []).map((c) => ({
         id: c.id,
         title: c.title,
-        selectable: c.status === "published",
+        status: c.status,
+        selectable: isCourseOpenForScheduling(c.status, coursesWithCurrentBatch.has(c.id)),
       })),
       modules: (modules.data ?? []).map((m) => ({ id: m.id, title: m.title, courseId: m.course_id })),
       batches: (batches.data ?? []).map((b) => ({

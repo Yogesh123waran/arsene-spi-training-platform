@@ -14,7 +14,8 @@ export function CoursesGrid({ courses, basePath = "/admin/courses" }: { courses:
 
   const filtered = useMemo(() => {
     return courses.filter((c) => {
-      const matchesQuery = query.trim() === "" || c.title.toLowerCase().includes(query.toLowerCase());
+      const q = query.trim().toLowerCase();
+      const matchesQuery = q === "" || c.title.toLowerCase().includes(q) || (c.courseCode ?? "").toLowerCase().includes(q);
       const matchesStatus = status === "all" || c.status === status;
       return matchesQuery && matchesStatus;
     });
@@ -33,9 +34,9 @@ export function CoursesGrid({ courses, basePath = "/admin/courses" }: { courses:
           className="sm:w-44"
           options={[
             { label: "All statuses", value: "all" },
-            { label: "Published", value: "published" },
+            { label: "Active", value: "published" },
             { label: "Draft", value: "draft" },
-            { label: "Archived", value: "archived" },
+            { label: "Inactive", value: "archived" },
           ]}
         />
       </div>

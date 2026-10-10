@@ -37,14 +37,16 @@ function toLabel(status: string): string {
 
 export interface StatusBadgeProps {
   status: string;
+  /** Optional display text (the tone still follows `status`), e.g. a course's Active / Inactive. */
+  label?: string;
   className?: string;
 }
 
 /** Maps any of the platform's entity status strings to a consistent badge tone/label. */
-export function StatusBadge({ status, className }: StatusBadgeProps) {
+export function StatusBadge({ status, label, className }: StatusBadgeProps) {
   return (
     <Badge tone={STATUS_TONE[status] ?? "neutral"} className={className}>
-      {toLabel(status)}
+      {label ?? toLabel(status)}
     </Badge>
   );
 }

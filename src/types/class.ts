@@ -110,7 +110,13 @@ export interface ClassFilterOptions {
    * Non-selectable entries stay listed so the filter bar and existing
    * classes still show them.
    */
-  courses: { id: string; title: string; selectable: boolean }[];
+  courses: {
+    id: string;
+    title: string;
+    /** draft / published / archived (Supabase mode). Archived courses are selectable only while they have a current batch. */
+    status?: string;
+    selectable: boolean;
+  }[];
   modules: { id: string; title: string; courseId: string }[];
   /**
    * `courseId` lets the form offer only batches of the chosen course;

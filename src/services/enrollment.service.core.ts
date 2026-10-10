@@ -22,6 +22,8 @@ import {
   ENROLLMENT_SOURCE_LABEL,
   ENROLLMENT_TRAINER_SCOPE_ERROR,
   enrollmentActions,
+  ENROLMENT_CLOSED_NOTE,
+  isEnrolmentClosedForCourse,
   enrollmentRefusalMessage,
   enrollmentSuccessMessage,
   isUuid,
@@ -84,10 +86,11 @@ export function createEnrollmentService(deps: EnrollmentServiceDeps) {
         enrollmentStatus: r.enrollment_status,
         enrolledAt: r.enrolled_at,
         completedAt: r.completed_at,
-        actions: enrollmentActions(mode, status, r.enrollment_status),
+        actions: enrollmentActions(mode, status, r.enrollment_status, header.course_status),
       }));
       const inBatch = new Set(rosterRows.map((r) => r.student_id));
-      const canEnrol = enrollmentActions(mode, status, null).enrol;
+      const canEnrol = enrollmentActions(mode, status, null, header.course_status).enrol;
+      const enrolmentClosed = isEnrolmentClosedForCourse(status, header.course_status);
 
       let candidates: EnrollmentCandidate[] = [];
       if (canEnrol && mode === "admin") {
@@ -134,6 +137,7 @@ export function createEnrollmentService(deps: EnrollmentServiceDeps) {
         })),
         candidates,
         canEnrol,
+        ...(enrolmentClosed ? { enrolmentNote: ENROLMENT_CLOSED_NOTE } : {}),
       };
     },
 

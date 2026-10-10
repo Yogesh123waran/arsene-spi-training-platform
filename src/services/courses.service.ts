@@ -8,8 +8,8 @@ import type { CourseDetail, CourseSummary } from "@/types/course";
  * Courses service — resolves the caller's identity server-side via
  * authService (never from a client-supplied argument) and derives the
  * data scope from it. Pages call this; they never call
- * coursesRepository directly. Read-only for now: course create/edit is
- * a separate future task (writes are admin-only in the database).
+ * coursesRepository directly. Read-only: creating, editing, archiving
+ * and module changes go through courseManagementService (0030).
  */
 
 export class CourseAuthorizationError extends Error {

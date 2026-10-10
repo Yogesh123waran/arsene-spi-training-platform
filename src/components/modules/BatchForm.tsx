@@ -104,7 +104,7 @@ export function BatchForm({ options, basePath }: { options: BatchFormOptions; ba
               error={errors.courseId}
               disabled={isPending}
               placeholder="Select a course"
-              hint={courses.length === 0 ? "No published courses are available." : undefined}
+              hint={courses.length === 0 ? "No active courses are available." : undefined}
               options={courses.map((c) => ({ label: c.title, value: c.id }))}
             />
             <Select

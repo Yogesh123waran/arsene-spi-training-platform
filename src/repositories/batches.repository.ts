@@ -57,7 +57,7 @@ const DEMO_TRAINER_NAME = "Rajesh Kumar";
  */
 const BATCH_LIST_SELECT = `
   id, name, status, start_date, end_date, max_seats, trainer_id,
-  courses ( title ),
+  courses ( title, status ),
   trainers ( full_name, status, profiles ( role, account_status ) ),
   batch_students ( student_id, enrollment_status )
 `;
@@ -89,6 +89,7 @@ export const batchesRepository = {
         id: row.id,
         name: row.name,
         course: row.courses?.title ?? "",
+        courseStatus: row.courses?.status,
         trainer: row.trainers?.full_name ?? BATCH_TRAINER_NOT_ASSIGNED,
         trainerId: row.trainer_id,
         // The Super Admin reads every trainer and profile; a trainer reads only their own.

@@ -71,8 +71,9 @@ export function ClassForm({ options, initial, basePath, lockTrainer = false }: C
     setDraft((prev) => ({ ...prev, [key]: value }));
   }
 
-  // Only selectable entries (published course, upcoming/ongoing batch,
-  // active trainer) are offered — plus the class's current value when
+  // Only selectable entries (published course — or an archived one that
+  // still has an upcoming/ongoing batch — upcoming/ongoing batch, active
+  // trainer) are offered — plus the class's current value when
   // editing, so an existing class still shows what it's linked to.
   const availableCourses = options.courses.filter((c) => c.selectable || c.id === initial?.courseId);
   const availableTrainers = options.trainers.filter((t) => t.selectable || t.id === initial?.trainerId);
@@ -153,7 +154,7 @@ export function ClassForm({ options, initial, basePath, lockTrainer = false }: C
               error={errors.courseId}
               disabled={isPending}
               placeholder="Select a course"
-              options={availableCourses.map((c) => ({ label: c.title, value: c.id }))}
+              options={availableCourses.map((c) => ({ label: c.status === "archived" ? `${c.title} (inactive — existing batches only)` : c.title, value: c.id }))}
             />
 
             <Select

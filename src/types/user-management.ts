@@ -201,6 +201,7 @@ export type InvitationCreateRefusal =
   | "account_exists"
   | "already_invited"
   | "batch_not_current"
+  | "course_archived"
   | "rate_limited"
   | "email_unavailable"
   | "permission"

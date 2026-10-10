@@ -73,7 +73,7 @@ test("code / name length limits", () => {
 test("course: missing, unknown, or not published → error", () => {
   assert.equal(validateCreateBatchInput(valid({ courseId: "" }), OPTIONS).errors.courseId, "Select a course.");
   assert.equal(validateCreateBatchInput(valid({ courseId: "c0000000-0000-4000-8000-00000000dead" }), OPTIONS).errors.courseId, "Select a valid course.");
-  assert.match(validateCreateBatchInput(valid({ courseId: DRAFT_COURSE }), OPTIONS).errors.courseId, /isn't published/);
+  assert.match(validateCreateBatchInput(valid({ courseId: DRAFT_COURSE }), OPTIONS).errors.courseId, /isn't active/);
 });
 test("trainer: unknown or inactive → error", () => {
   assert.match(validateCreateBatchInput(valid({ trainerId: "70000000-0000-4000-8000-00000000dead" }), OPTIONS).errors.trainerId, /valid trainer/);
@@ -136,4 +136,11 @@ test("classifyBatchInsertError maps codes", () => {
   assert.equal(classifyBatchInsertError({ code: "42501" }), "permission");
   assert.equal(classifyBatchInsertError(new Error("x")), null);
   assert.equal(classifyBatchInsertError(null), null);
+});
+
+test("0030: a course that isn't published (archived / draft since the form loaded) → course field error", async () => {
+  assert.equal(classifyBatchInsertError({ code: "23514", hint: "course_not_published" }), "course_unavailable");
+  assert.equal(classifyBatchInsertError({ code: "23514", hint: "" }), "rejected", "other check violations unchanged");
+  const { d } = deps({ insert: async () => { throw Object.assign(new Error("x"), { code: "23514", hint: "course_not_published" }); } });
+  await assert.rejects(createBatchWith(d, valid()), (err) => err instanceof BatchCreateValidationError && /isn't active/.test(err.errors.courseId));
 });

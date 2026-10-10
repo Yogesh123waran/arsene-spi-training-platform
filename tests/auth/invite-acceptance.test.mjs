@@ -151,7 +151,7 @@ test("repository: password update maps weak_password; the RPC takes no arguments
   assert.doesNotMatch(threw.logs, new RegExp(PASSWORD));
 
   const c = fakeClient();
-  assert.deepEqual(await (await repoWith(c).open()).acceptInvitation(), { ok: true, role: "student", enrolled: false });
+  assert.deepEqual(await (await repoWith(c).open()).acceptInvitation(), { ok: true, role: "student", enrolled: false, enrolmentSkipped: null });
   assert.deepEqual(c.calls.at(-1), ["rpc", "accept_user_invitation", undefined], "nothing about the role, person or batch is sent");
   assert.deepEqual(await (await repoWith(fakeClient({ rpc: () => ({ data: { ok: false, reason: "expired" }, error: null }) })).open()).acceptInvitation(), { ok: false, reason: "expired" });
   const rpcErr = await capture(async () => (await repoWith(fakeClient({ rpc: () => ({ data: null, error: { code: "42501", message: "permission denied" } }) })).open()).acceptInvitation());
@@ -380,4 +380,41 @@ test("existing files: only the allowed additions (DB type, three login messages)
   assert.match(src("src/lib/supabase/types.ts"), /accept_user_invitation: \{\s*Args: Record<string, never>;\s*Returns: Json;\s*\}/);
   const login = src("src/components/auth/LoginForm.tsx");
   for (const k of ["invite_invalid", "invite_session_missing", "invite_failed"]) assert.match(login, new RegExp(`\\b${k}: "`), k);
+});
+
+test("0030: accepted but not enrolled because the course is archived → active account, portal home, and a notice to contact the Super Admin", async () => {
+  // Repository: the database's reason is carried through (and only as a known code).
+  const skipped = fakeClient({ rpc: () => ({ data: { ok: true, role: "student", enrolled: false, enrolment_skipped: "course_archived" }, error: null }) });
+  assert.deepEqual(await (await repoWith(skipped).open()).acceptInvitation(), { ok: true, role: "student", enrolled: false, enrolmentSkipped: "course_archived" });
+
+  // Service: the activation flow is unchanged (same calls, same order, same home); the notice is added.
+  const f = fakeSession({ accept: { ok: true, role: "student", enrolled: false, enrolmentSkipped: "course_archived" } });
+  const { result, logs } = await capture(() => f.service.completeInvitation(PASSWORD, PASSWORD));
+  assert.deepEqual(result, { ok: true, home: "/student", notice: lib.ENROLMENT_SKIPPED_ARCHIVED_NOTICE });
+  assert.match(result.notice, /account is active/);
+  assert.match(result.notice, /course has been deactivated/);
+  assert.match(result.notice, /contact your Super Admin to be assigned to an available batch/);
+  assert.deepEqual(names(f.calls), ["getUser", "fetchRole", "updatePassword", "acceptInvitation", "fetchRole"], "no sign-out: the account is active");
+  assert.doesNotMatch(JSON.stringify(result) + logs, new RegExp(PASSWORD));
+
+  // Other outcomes keep the plain result: enrolled, a full batch (no reason), or an unknown code (never passed through).
+  for (const accept of [
+    { ok: true, role: "student", enrolled: true, enrolmentSkipped: null },
+    { ok: true, role: "student", enrolled: false, enrolmentSkipped: null },
+    { ok: true, role: "student", enrolled: false, enrolmentSkipped: "something_new" },
+  ]) {
+    const g = fakeSession({ accept });
+    assert.deepEqual((await capture(() => g.service.completeInvitation(PASSWORD, PASSWORD))).result, { ok: true, home: "/student" }, JSON.stringify(accept));
+  }
+  assert.equal(lib.enrolmentSkippedNotice("course_archived"), lib.ENROLMENT_SKIPPED_ARCHIVED_NOTICE);
+  assert.equal(lib.enrolmentSkippedNotice("batch_full"), undefined);
+});
+
+test("0030: the accept form shows the notice and waits for the person before going to the portal", () => {
+  const form = src("src/components/auth/AcceptInvitationForm.tsx");
+  assert.match(form, /if \(result\.notice\) \{[\s\S]*?setNotice\(\{ text: result\.notice, proceed \}\);\s*return;\s*\}/);
+  assert.match(form, /onClick=\{notice\.proceed\}/, "Continue uses the same single, validated navigation");
+  assert.match(form, /role="status"/);
+  assert.match(form, /Continue to my portal/);
+  assert.ok(form.indexOf("isPortalHome(result.home)") < form.indexOf("setNotice({"), "the destination is validated before anything else");
 });

@@ -2,6 +2,7 @@ import "server-only";
 import { authService } from "./auth.service";
 import { batchesRepository, BatchRepositoryError, type BatchScope } from "@/repositories/batches.repository";
 import { getClassFilterOptions } from "@/lib/classes/filter-options";
+import { isCourseOpenForNewBatches } from "@/lib/courses/course-availability";
 import { batchTrainerRepository } from "@/repositories/batch-trainer.repository";
 import {
   BatchCreateAuthorizationError,
@@ -52,8 +53,9 @@ async function requireUser(): Promise<AuthUser> {
 
 /**
  * Course and trainer choices for the Add Batch form — the same lists the
- * Classes form uses (published courses, active trainers), read with the
- * caller's own session. A trainer is selectable only if also available
+ * Classes form uses, read with the caller's own session. Only PUBLISHED
+ * courses are offered for a new batch (an archived course stays
+ * schedulable for its existing batches, but never gets a new one). A trainer is selectable only if also available
  * (trainer role, active account — P3.6); the database (0021) refuses an
  * unavailable one regardless.
  */
@@ -61,7 +63,12 @@ async function loadBatchFormOptions(): Promise<BatchFormOptions> {
   const [options, available] = await Promise.all([getClassFilterOptions(), batchTrainerRepository.listAvailableTrainers()]);
   const availableIds = new Set(available.map((t) => t.id));
   return {
-    courses: options.courses,
+    courses: options.courses.map((c) => ({
+      id: c.id,
+      title: c.title,
+      // Demo options carry no status: their own flag applies.
+      selectable: c.status === undefined ? c.selectable : isCourseOpenForNewBatches(c.status),
+    })),
     trainers: options.trainers.map((t) => ({ ...t, selectable: t.selectable && availableIds.has(t.id) })),
   };
 }

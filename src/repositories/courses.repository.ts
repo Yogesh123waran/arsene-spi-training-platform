@@ -74,14 +74,14 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
  * comes back null and is simply skipped.
  */
 const COURSE_LIST_SELECT = `
-  id, title, description, status, duration_hours,
+  id, course_code, title, description, status, duration_hours,
   modules ( id ),
   batches ( trainers ( full_name ) )
 `;
 
 const COURSE_DETAIL_SELECT = `
-  id, title, description, duration_hours,
-  modules ( id, sequence, title ),
+  id, course_code, title, description, level, status, duration_hours,
+  modules ( id, sequence, title, module_code, description, duration_hours ),
   batches ( trainers ( full_name ) )
 `;
 
@@ -145,6 +145,7 @@ export const coursesRepository = {
 
       return (data ?? []).map((row) => ({
         id: row.id,
+        courseCode: row.course_code,
         title: row.title,
         description: row.description,
         status: row.status,
@@ -185,6 +186,9 @@ export const coursesRepository = {
 
       return {
         id: data.id,
+        courseCode: data.course_code,
+        level: data.level,
+        status: data.status,
         title: data.title,
         description: data.description,
         durationHours: Number(data.duration_hours),
@@ -192,7 +196,14 @@ export const coursesRepository = {
         modules: [...data.modules]
           .sort((a, b) => a.sequence - b.sequence)
           // topics / status (learner progress): no data source yet — hidden.
-          .map((m) => ({ id: m.id, sequence: m.sequence, title: m.title })),
+          .map((m) => ({
+            id: m.id,
+            sequence: m.sequence,
+            title: m.title,
+            moduleCode: m.module_code,
+            description: m.description,
+            durationHours: Number(m.duration_hours),
+          })),
         // topics / progress: no data source yet — left undefined (hidden).
       };
     } catch (err) {

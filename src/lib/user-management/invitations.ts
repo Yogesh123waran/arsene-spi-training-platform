@@ -145,6 +145,7 @@ export const CREATE_REASON_MESSAGE: Record<InvitationCreateRefusal, string> = {
   account_exists: "This address already belongs to an account. Use the account's lifecycle actions instead.",
   already_invited: "This address already has a pending invitation. Resend it instead.",
   batch_not_current: "Choose an upcoming or ongoing batch.",
+  course_archived: "This batch hasn't started and its course is inactive, so it takes no new students. Choose another batch.",
   rate_limited: "Too many invitations in the last hour. Try again later.",
   email_unavailable: "This address can't be invited.",
   permission: "You don't have permission to do that.",

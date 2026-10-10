@@ -656,3 +656,9 @@ test("P3.12 sources: the action fixes the role; the dialog asks only name + emai
   assert.match(page, /actions=\{loadError \? undefined : <InviteUserButton kind="super_admin" \/>\}/);
   assert.doesNotMatch(dialog + code("src/components/modules/InviteUserButton.tsx"), /role:\s*["']|SUPABASE_SERVICE_ROLE_KEY|auth\.admin|@\/repositories\//, "no client-side role authority or privileged access");
 });
+
+test("0030: course_archived is a known invitation refusal (mapped, not treated as unexpected)", () => {
+  assert.equal(I.asCreateRefusal("course_archived"), "course_archived");
+  assert.match(I.CREATE_REASON_MESSAGE.course_archived, /course is inactive, so it takes no new students\. Choose another batch\./);
+  assert.equal(I.createRefusalField("course_archived"), null, "a form-level message, not an email field error");
+});

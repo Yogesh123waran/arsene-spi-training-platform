@@ -977,6 +977,31 @@ export type EnrollmentEventsRow = {
   reason: string | null;
 };
 
+export type CourseEventTypeColumn =
+  | "course_created"
+  | "course_updated"
+  | "course_status_changed"
+  | "course_deleted"
+  | "module_created"
+  | "module_updated"
+  | "module_moved"
+  | "module_deleted";
+
+/**
+ * public.course_events — append-only Course Management audit (0030). Written
+ * only by the admin_* course functions; Super Admin SELECT only. course_id /
+ * module_id are not foreign keys (the history outlives a deleted course).
+ */
+export type CourseEventsRow = {
+  id: number;
+  occurred_at: string;
+  actor_id: string | null;
+  event_type: CourseEventTypeColumn;
+  course_id: string;
+  module_id: string | null;
+  detail: Json;
+};
+
 /** One row returned by public.my_notifications(p_limit). */
 export type MyNotificationsRow = {
   id: string;
@@ -1490,6 +1515,12 @@ export type Database = {
         Update: NoClientWrites;
         Relationships: [];
       };
+      course_events: {
+        Row: CourseEventsRow;
+        Insert: NoClientWrites;
+        Update: NoClientWrites;
+        Relationships: [];
+      };
     };
     Views: {
       test_best_results: {
@@ -1747,6 +1778,43 @@ export type Database = {
       /** Name + contact details of a trainer. Returns { ok, reason?, fields? }. */
       admin_update_trainer: {
         Args: { p_trainer_id: string; p: Json };
+        Returns: Json;
+      };
+      /** 0030 Course Management, Super Admin only (42501 otherwise). Each returns { ok, reason?, … }. */
+      admin_create_course: {
+        Args: { p: Json };
+        Returns: Json;
+      };
+      admin_update_course: {
+        Args: { p_course_id: string; p: Json };
+        Returns: Json;
+      };
+      admin_set_course_status: {
+        Args: { p_course_id: string; p_status: string };
+        Returns: Json;
+      };
+      admin_delete_course: {
+        Args: { p_course_id: string };
+        Returns: Json;
+      };
+      admin_create_module: {
+        Args: { p_course_id: string; p: Json };
+        Returns: Json;
+      };
+      admin_update_module: {
+        Args: { p_module_id: string; p: Json };
+        Returns: Json;
+      };
+      admin_move_module: {
+        Args: { p_module_id: string; p_direction: string };
+        Returns: Json;
+      };
+      admin_delete_module: {
+        Args: { p_module_id: string };
+        Returns: Json;
+      };
+      admin_course_usage: {
+        Args: { p_course_id: string };
         Returns: Json;
       };
       /** Assign/change a current batch's trainer (row lock, audited; 0021 refuses direct writes). Returns { ok, reason?, previous?, trainer_id? }. */

@@ -59,6 +59,8 @@ export interface BatchSummary {
   id: string;
   name: string;
   course: string;
+  /** The course's status (Supabase mode): an archived course's upcoming batches take no new students (0030). */
+  courseStatus?: string;
   /** Assigned trainer's name, or "Trainer not assigned". */
   trainer: string;
   /** Assigned trainer's id (Supabase mode); null when none is assigned. */

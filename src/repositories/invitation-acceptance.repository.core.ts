@@ -23,7 +23,15 @@ type Client = SupabaseClient<Database, "public">;
 
 export type VerifyInviteResult = "verified" | "invalid" | "failed";
 export type UpdatePasswordResult = { ok: true } | { ok: false; reason: "weak_password" | "failed" };
-export type AcceptInvitationResult = { ok: true; role: string | null; enrolled: boolean } | { ok: false; reason: string };
+export type AcceptInvitationResult =
+  | {
+      ok: true;
+      role: string | null;
+      enrolled: boolean;
+      /** 0030: why the invitation's batch enrolment was skipped (e.g. "course_archived"), or null. */
+      enrolmentSkipped: string | null;
+    }
+  | { ok: false; reason: string };
 
 /** Only a code or status — never a message (it could echo personal data). */
 function diagnostic(error: unknown): string {
@@ -97,7 +105,14 @@ function sessionFor(client: Client) {
           return { ok: false, reason: "error" };
         }
         const d = asObject(data);
-        if (d?.ok === true) return { ok: true, role: typeof d.role === "string" ? d.role : null, enrolled: d.enrolled === true };
+        if (d?.ok === true) {
+          return {
+            ok: true,
+            role: typeof d.role === "string" ? d.role : null,
+            enrolled: d.enrolled === true,
+            enrolmentSkipped: typeof d.enrolment_skipped === "string" ? d.enrolment_skipped : null,
+          };
+        }
         if (d?.ok === false) return { ok: false, reason: typeof d.reason === "string" ? d.reason : "unknown" };
         logAuth("accept_user_invitation", "unexpected result");
         return { ok: false, reason: "unknown" };

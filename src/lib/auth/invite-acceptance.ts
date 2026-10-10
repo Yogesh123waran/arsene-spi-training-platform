@@ -115,7 +115,12 @@ export function getPasswordStrength(password: string): { score: number; label: s
 export type ConfirmInvitationResult = { ok: true } | { ok: false; code: "invite_invalid" | "invite_failed" };
 
 export type CompleteInvitationResult =
-  | { ok: true; home: PortalHome }
+  | {
+      ok: true;
+      home: PortalHome;
+      /** Shown before continuing when the account is active but something in the invitation couldn't be done. */
+      notice?: string;
+    }
   | {
       ok: false;
       error: string;
@@ -124,6 +129,15 @@ export type CompleteInvitationResult =
       /** True when the session was ended (or is gone): the form cannot be used again. */
       ended: boolean;
     };
+
+/** 0030: the invitation's batch belongs to an archived course, so the database activated the account without enrolling it. */
+export const ENROLMENT_SKIPPED_ARCHIVED_NOTICE =
+  "Your account is active, but you weren't added to the batch in your invitation because its course has been deactivated. Please contact your Super Admin to be assigned to an available batch.";
+
+/** A database "why the enrolment was skipped" code → the notice to show, or none (unknown codes are never passed through). */
+export function enrolmentSkippedNotice(code: unknown): string | undefined {
+  return code === "course_archived" ? ENROLMENT_SKIPPED_ARCHIVED_NOTICE : undefined;
+}
 
 export const SETUP_GENERIC_ERROR = "We couldn't complete your account setup. Please try again later or contact your administrator.";
 export const SESSION_MISSING_ERROR = "Your invitation session has ended. Open the invitation link from your email again.";

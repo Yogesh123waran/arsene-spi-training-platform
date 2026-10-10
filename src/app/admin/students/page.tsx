@@ -4,6 +4,7 @@ import { InviteUserButton } from "@/components/modules/InviteUserButton";
 import type { InviteBatchOption } from "@/components/modules/InviteUserDialog";
 import { StudentsTable } from "@/components/modules/StudentsTable";
 import { batchesService } from "@/services/batches.service";
+import { isEnrolmentClosedForCourse } from "@/lib/enrollments/enrollment";
 import { studentsService } from "@/services/students.service";
 import type { StudentSummary } from "@/types/student";
 
@@ -21,11 +22,12 @@ export default async function AdminStudentsPage() {
   }
 
   // Optional batch for a student invitation: the Super Admin's batches that can still take
-  // enrolments (the database re-checks the batch when the invitation is created).
+  // enrolments — not an upcoming batch of an archived course (0030). The database re-checks
+  // the batch when the invitation is created.
   let inviteBatches: InviteBatchOption[] = [];
   try {
     inviteBatches = (await batchesService.listBatches())
-      .filter((b) => b.status === "upcoming" || b.status === "ongoing")
+      .filter((b) => (b.status === "upcoming" || b.status === "ongoing") && !isEnrolmentClosedForCourse(b.status, b.courseStatus))
       .map((b) => ({ id: b.id, label: `${b.name} · ${b.course} (${b.status})` }));
   } catch (err) {
     console.error("[admin/students] batch options failed:", err instanceof Error ? err.message : err);

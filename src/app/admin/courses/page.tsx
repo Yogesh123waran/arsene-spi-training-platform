@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Plus } from "lucide-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 import { Button } from "@/components/ui/Button";
@@ -25,9 +26,11 @@ export default async function AdminCoursesPage() {
         title="Courses"
         description="Manage the SPI course catalog: modules, levels and durations."
         actions={
-          <Button size="sm">
-            <Plus className="h-4 w-4" /> Add Course
-          </Button>
+          <Link href="/admin/courses/new">
+            <Button size="sm">
+              <Plus className="h-4 w-4" /> Add Course
+            </Button>
+          </Link>
         }
       />
       {loadError ? (

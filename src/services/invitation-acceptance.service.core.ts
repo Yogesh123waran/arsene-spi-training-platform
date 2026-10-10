@@ -22,6 +22,7 @@ import {
   PASSWORD_WEAK_ERROR,
   SESSION_MISSING_ERROR,
   SETUP_GENERIC_ERROR,
+  enrolmentSkippedNotice,
   validateNewPassword,
   type CompleteInvitationResult,
   type ConfirmInvitationResult,
@@ -102,7 +103,9 @@ export function createInvitationAcceptanceService(deps: InvitationAcceptanceServ
         await session.signOut();
         return { ok: false, error: SETUP_GENERIC_ERROR, ended: true };
       }
-      return { ok: true, home };
+      // 7. 0030: active but not enrolled (the invitation's course was archived) — say so, with what to do next.
+      const notice = enrolmentSkippedNotice(accepted.enrolmentSkipped);
+      return notice ? { ok: true, home, notice } : { ok: true, home };
     },
   };
 }

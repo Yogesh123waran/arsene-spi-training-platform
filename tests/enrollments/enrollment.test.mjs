@@ -270,3 +270,51 @@ function execListClientFiles() {
   walk("src");
   return out;
 }
+
+test("0030: an archived course's upcoming batch refusal (course_archived) has its own message; never the generic one", () => {
+  assert.match(lib.enrollmentRefusalMessage("course_archived"), /course is inactive, so it takes no new students/);
+  assert.match(lib.enrollmentRefusalMessage("course_archived"), /Ongoing batches of inactive courses still accept enrolments/);
+  assert.notEqual(lib.enrollmentRefusalMessage("course_archived"), lib.ENROLLMENT_GENERIC_ERROR);
+});
+
+test("0030 UI rule: an archived course's UPCOMING batch offers no enrol / re-enrol (withdraw stays); ongoing batches are unchanged", () => {
+  const a = (bs, es, cs) => lib.enrollmentActions("admin", bs, es, cs);
+  const t = (bs, es, cs) => lib.enrollmentActions("trainer", bs, es, cs);
+  assert.equal(a("upcoming", null, "archived").enrol, false);
+  assert.equal(a("upcoming", "withdrawn", "archived").reEnrol, false);
+  assert.equal(a("upcoming", "enrolled", "archived").withdraw, true, "withdrawal is not an enrolment");
+  assert.equal(t("upcoming", null, "archived").enrol, false);
+  for (const [bs, cs] of [["ongoing", "archived"], ["upcoming", "published"], ["upcoming", undefined]]) {
+    assert.equal(a(bs, null, cs).enrol, true, `${bs}/${cs}`);
+    assert.equal(t(bs, null, cs).enrol, true, `${bs}/${cs} trainer`);
+  }
+  assert.equal(lib.isEnrolmentClosedForCourse("upcoming", "archived"), true);
+  assert.equal(lib.isEnrolmentClosedForCourse("ongoing", "archived"), false);
+});
+
+test("0030 batch page: upcoming batch of an archived course — no Enrol button, no candidates loaded, the reason shown", async () => {
+  const header = { id: B, batch_code: "B-1", name: "Batch", status: "upcoming", start_date: "2027-01-01", end_date: "2027-12-31", max_seats: 10, trainer_id: T, course: "Course", course_status: "archived", trainer_name: "Tess" };
+  const roster = [{ student_id: S, student_code: "S-1", full_name: "Sam", enrollment_status: "enrolled", enrolled_at: "2026-01-01", completed_at: null }];
+  const { svc, calls } = service("admin", { header, roster, students: [{ id: "x", student_code: "X", full_name: "X", status: "active", role: "student", account_status: "active" }] });
+  const d = await svc.getBatchDetail(B);
+  assert.equal(d.canEnrol, false);
+  assert.deepEqual(d.candidates, []);
+  assert.match(d.enrolmentNote, /course is inactive, so it takes no new students/);
+  assert.equal(d.roster[0].actions.withdraw, true, "existing students can still be withdrawn");
+  assert.ok(!calls.some((c) => c[0] === "listStudents"), "candidates aren't even loaded");
+  // The same batch once the course is reactivated: enrolment reopens, no note.
+  const reopened = await service("admin", { header: { ...header, course_status: "published" }, students: [] }).svc.getBatchDetail(B);
+  assert.equal(reopened.canEnrol, true);
+  assert.equal(reopened.enrolmentNote, undefined);
+  // An ongoing batch of an archived course still enrols.
+  const ongoing = await service("admin", { header: { ...header, status: "ongoing" }, students: [] }).svc.getBatchDetail(B);
+  assert.equal(ongoing.canEnrol, true);
+  assert.equal(ongoing.enrolmentNote, undefined);
+});
+
+test("0030 wiring: the batch header reads the course status; the student-invitation picker skips upcoming batches of archived courses", () => {
+  assert.match(src("src/repositories/enrollment.repository.core.ts"), /courses \( title, status \)/);
+  assert.match(src("src/repositories/batches.repository.ts"), /courses \( title, status \),/);
+  assert.match(src("src/app/admin/students/page.tsx"), /!isEnrolmentClosedForCourse\(b\.status, b\.courseStatus\)/);
+  assert.match(src("src/components/modules/BatchDetailView.tsx"), /\{detail\.enrolmentNote && \(/);
+});

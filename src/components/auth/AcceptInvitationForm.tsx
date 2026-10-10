@@ -4,7 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Eye, EyeOff, AlertCircle } from "lucide-react";
+import { Eye, EyeOff, AlertCircle, Info } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { ProgressBar } from "@/components/ui/ProgressBar";
@@ -34,6 +34,8 @@ export function AcceptInvitationForm({ email }: { email: string | null }) {
   const [fieldError, setFieldError] = useState<{ field: PasswordField; error: string } | null>(null);
   const [ended, setEnded] = useState(false);
   const [succeeded, setSucceeded] = useState(false);
+  /** Account active, but something in the invitation couldn't be done (0030: archived course) — shown before continuing. */
+  const [notice, setNotice] = useState<{ text: string; proceed: () => void } | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const strength = useMemo(() => getPasswordStrength(password), [password]);
@@ -59,8 +61,17 @@ export function AcceptInvitationForm({ email }: { email: string | null }) {
           return;
         }
         setSucceeded(true);
-        router.replace(result.home);
-        router.refresh();
+        // The one navigation of this form: only the database role's validated portal home.
+        const proceed = () => {
+          router.replace(result.home);
+          router.refresh();
+        };
+        if (result.notice) {
+          // Active, but something in the invitation couldn't be done: explain first, continue on request.
+          setNotice({ text: result.notice, proceed });
+          return;
+        }
+        proceed();
         return;
       }
       if (result.field) setFieldError({ field: result.field, error: result.error });
@@ -71,6 +82,20 @@ export function AcceptInvitationForm({ email }: { email: string | null }) {
         setConfirmPassword("");
       }
     });
+  }
+
+  if (notice) {
+    return (
+      <div className="flex flex-col gap-4">
+        <div role="status" className="flex items-start gap-2 rounded-md border border-surface-border bg-surface-sunken px-3 py-2.5 text-sm text-ink">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-ink-muted" aria-hidden />
+          <span>{notice.text}</span>
+        </div>
+        <Button type="button" onClick={notice.proceed}>
+          Continue to my portal
+        </Button>
+      </div>
+    );
   }
 
   return (
