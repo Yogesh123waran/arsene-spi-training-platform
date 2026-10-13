@@ -29,13 +29,16 @@ test("Remove only in the Super Admin menu (never in trainer mode); the table its
   assert.match(src("src/app/trainer/students/page.tsx"), /<StudentsTable rows=\{students\} trainerEdit \/>/, "the trainer page renders trainer mode");
 });
 
-test("trainer View profile unchanged: still the placeholder, never the Super Admin account panel", () => {
+test("trainer mode (P5.0): no View profile placeholder and never the Super Admin account panel; no empty menu", () => {
   const table = strip(src(TABLE));
   assert.match(
     table,
-    /<DropdownItem onClick=\{\(\) => \(trainerEdit \? notImplemented\("View profile"\) : openAccount\(s\.id\)\)\}>\s*<Eye className="h-3\.5 w-3\.5" \/> View profile/,
-    "trainer mode keeps the View profile placeholder"
+    /\{!trainerEdit && \(\s*<DropdownItem onClick=\{\(\) => openAccount\(s\.id\)\}>\s*<Eye className="h-3\.5 w-3\.5" \/> View profile\s*<\/DropdownItem>\s*\)\}/,
+    "View profile is Super Admin only (trainers have no student profile page)"
   );
+  assert.equal((table.match(/> View profile/g) ?? []).length, 1, "one View profile item");
+  assert.doesNotMatch(table, /notImplemented|isn't wired up|presentation-only|useToast/, "no placeholder toasts left");
+  assert.match(table, /\{\(!trainerEdit \|\| s\.editable === true\) && \(\s*<Dropdown/, "a trainer row without actions shows no menu");
   assert.equal((table.match(/openAccount\(s\.id\)/g) ?? []).length, 1, "the view-mode panel is opened only from the Super Admin View profile");
   assert.equal((table.match(/editAccount\(s\.id\)/g) ?? []).length, 1, "the edit-mode panel only from the Super Admin Edit");
 });

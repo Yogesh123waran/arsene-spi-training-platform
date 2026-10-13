@@ -19,7 +19,6 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { Pagination } from "@/components/ui/Pagination";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { useToast } from "@/components/ui/Toast";
 import { TrainerEditStudentDialog } from "@/components/modules/TrainerEditStudentDialog";
 import { RemoveAccountDialog } from "@/components/modules/RemoveAccountDialog";
 import { DEFAULT_USER_FILTERS, userDetailHref, userEditDetailsHref } from "@/lib/user-management/users";
@@ -62,7 +61,6 @@ export function StudentsTable({ rows, trainerEdit = false }: { rows: StudentSumm
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(1);
-  const { showToast } = useToast();
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
@@ -77,10 +75,6 @@ export function StudentsTable({ rows, trainerEdit = false }: { rows: StudentSumm
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  function notImplemented(action: string) {
-    showToast({ variant: "info", title: `${action} isn't wired up yet`, description: "This UI pass is presentation-only." });
-  }
 
   /** Super Admin only: the student's account panel on the Users page. */
   function openAccount(studentId: string) {
@@ -171,40 +165,46 @@ export function StudentsTable({ rows, trainerEdit = false }: { rows: StudentSumm
                   <StatusBadge status={displayStatus(s)} />
                 </TableCell>
                 <TableCell className="text-right">
-                  <Dropdown
-                    align="right"
-                    trigger={
-                      <button
-                        aria-label={`Actions for ${s.name}`}
-                        className="rounded p-1.5 text-ink-muted hover:bg-surface-sunken"
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                    }
-                  >
-                    {/* Trainer: unchanged placeholder. Super Admin (P3.11-A): the student's account panel. */}
-                    <DropdownItem onClick={() => (trainerEdit ? notImplemented("View profile") : openAccount(s.id))}>
-                      <Eye className="h-3.5 w-3.5" /> View profile
-                    </DropdownItem>
-                    {!trainerEdit ? (
-                      canEditAsStudent(s) ? (
-                        <DropdownItem onClick={() => editAccount(s.id)}>
-                          <Pencil className="h-3.5 w-3.5" /> Edit
+                  {/* A trainer row the trainer can't edit has no actions, so no (empty) menu is shown. */}
+                  {(!trainerEdit || s.editable === true) && (
+                    <Dropdown
+                      align="right"
+                      trigger={
+                        <button
+                          aria-label={`Actions for ${s.name}`}
+                          className="rounded p-1.5 text-ink-muted hover:bg-surface-sunken"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      }
+                    >
+                      {/* Super Admin (P3.11-A): the student's account panel. Trainers have no student profile page, so
+                          P5.0 removed their "View profile" placeholder. */}
+                      {!trainerEdit && (
+                        <DropdownItem onClick={() => openAccount(s.id)}>
+                          <Eye className="h-3.5 w-3.5" /> View profile
                         </DropdownItem>
-                      ) : null
-                    ) : s.editable === true ? (
-                      <DropdownItem onClick={() => setEditTarget({ id: s.id, name: s.name })}>
-                        <Pencil className="h-3.5 w-3.5" /> Edit student
-                      </DropdownItem>
-                    ) : null}
-                    {/* Trainers have no remove/deactivate authority (P3.10-C). Super Admin Remove (P3.11-B) deactivates the
-                        account after confirmation — nothing is deleted; the server re-checks everything. */}
-                    {!trainerEdit && canRemove(s) && (
-                      <DropdownItem onClick={() => setRemoveTarget({ id: s.id, name: s.name })} className="text-signal-red">
-                        <Trash2 className="h-3.5 w-3.5" /> Remove
-                      </DropdownItem>
-                    )}
-                  </Dropdown>
+                      )}
+                      {!trainerEdit ? (
+                        canEditAsStudent(s) ? (
+                          <DropdownItem onClick={() => editAccount(s.id)}>
+                            <Pencil className="h-3.5 w-3.5" /> Edit
+                          </DropdownItem>
+                        ) : null
+                      ) : s.editable === true ? (
+                        <DropdownItem onClick={() => setEditTarget({ id: s.id, name: s.name })}>
+                          <Pencil className="h-3.5 w-3.5" /> Edit student
+                        </DropdownItem>
+                      ) : null}
+                      {/* Trainers have no remove/deactivate authority (P3.10-C). Super Admin Remove (P3.11-B) deactivates the
+                          account after confirmation — nothing is deleted; the server re-checks everything. */}
+                      {!trainerEdit && canRemove(s) && (
+                        <DropdownItem onClick={() => setRemoveTarget({ id: s.id, name: s.name })} className="text-signal-red">
+                          <Trash2 className="h-3.5 w-3.5" /> Remove
+                        </DropdownItem>
+                      )}
+                    </Dropdown>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

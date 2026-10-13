@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, MoreHorizontal, Eye, Pencil, Users, UserCog } from "lucide-react";
+import { Search, MoreHorizontal, Eye, Users, UserCog } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import {
@@ -17,7 +17,6 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Dropdown, DropdownItem } from "@/components/ui/Dropdown";
 import { Pagination } from "@/components/ui/Pagination";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { useToast } from "@/components/ui/Toast";
 import { Badge } from "@/components/ui/Badge";
 import { AssignTrainerDialog, type AssignTrainerTarget } from "@/components/modules/AssignTrainerDialog";
 import { isAssignableBatchStatus, type AvailableTrainerOption } from "@/lib/batches/assign-trainer";
@@ -54,7 +53,6 @@ export function BatchesTable({
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [page, setPage] = useState(1);
-  const { showToast } = useToast();
 
   const filtered = useMemo(() => {
     return rows.filter((r) => {
@@ -66,10 +64,6 @@ export function BatchesTable({
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  function notImplemented(action: string) {
-    showToast({ variant: "info", title: `${action} isn't wired up yet`, description: "This UI pass is presentation-only." });
-  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -146,41 +140,41 @@ export function BatchesTable({
                   <StatusBadge status={b.status} />
                 </TableCell>
                 <TableCell className="text-right">
-                  <Dropdown
-                    align="right"
-                    trigger={
-                      <button
-                        aria-label={`Actions for ${b.name}`}
-                        className="rounded p-1.5 text-ink-muted hover:bg-surface-sunken"
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                    }
-                  >
-                    <DropdownItem onClick={() => (detailBasePath ? router.push(`${detailBasePath}/${encodeURIComponent(b.id)}`) : notImplemented("View batch"))}>
-                      <Eye className="h-3.5 w-3.5" /> View
-                    </DropdownItem>
-                    <DropdownItem onClick={() => notImplemented("Edit batch")}>
-                      <Pencil className="h-3.5 w-3.5" /> Edit
-                    </DropdownItem>
-                    {assignment && (
-                      <DropdownItem
-                        disabled={!isAssignableBatchStatus(b.status)}
-                        title={isAssignableBatchStatus(b.status) ? undefined : "Only upcoming or ongoing batches can have their trainer changed."}
-                        onClick={() =>
-                          setAssignTarget({
-                            id: b.id,
-                            name: b.name,
-                            trainerId: b.trainerId ?? null,
-                            trainerName: b.trainerId ? b.trainer : null,
-                            trainerUnavailable: b.trainerUnavailable === true,
-                          })
-                        }
-                      >
-                        <UserCog className="h-3.5 w-3.5" /> {b.trainerId ? "Change trainer" : "Assign trainer"}
+                  {detailBasePath && (
+                    <Dropdown
+                      align="right"
+                      trigger={
+                        <button
+                          aria-label={`Actions for ${b.name}`}
+                          className="rounded p-1.5 text-ink-muted hover:bg-surface-sunken"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      }
+                    >
+                      {/* P5.0: no "Edit" — batch editing isn't built, so it isn't offered (trainers have no batch write rights). */}
+                      <DropdownItem onClick={() => router.push(`${detailBasePath}/${encodeURIComponent(b.id)}`)}>
+                        <Eye className="h-3.5 w-3.5" /> View
                       </DropdownItem>
-                    )}
-                  </Dropdown>
+                      {assignment && (
+                        <DropdownItem
+                          disabled={!isAssignableBatchStatus(b.status)}
+                          title={isAssignableBatchStatus(b.status) ? undefined : "Only upcoming or ongoing batches can have their trainer changed."}
+                          onClick={() =>
+                            setAssignTarget({
+                              id: b.id,
+                              name: b.name,
+                              trainerId: b.trainerId ?? null,
+                              trainerName: b.trainerId ? b.trainer : null,
+                              trainerUnavailable: b.trainerUnavailable === true,
+                            })
+                          }
+                        >
+                          <UserCog className="h-3.5 w-3.5" /> {b.trainerId ? "Change trainer" : "Assign trainer"}
+                        </DropdownItem>
+                      )}
+                    </Dropdown>
+                  )}
                 </TableCell>
               </TableRow>
             ))}

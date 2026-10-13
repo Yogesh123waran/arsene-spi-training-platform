@@ -66,12 +66,16 @@ test("view: a server component with no mutation code of its own (slice 3A: it on
   assert.match(view, /<StatusBadge status=\{r\.enrollmentStatus\} \/>/, "every enrolment status shown (withdrawn included for the Super Admin)");
 });
 
-test("View: the Super Admin batches table opens /admin/batches/<id>; the trainer table (P3.10-A) opens /trainer/batches/<id>; Edit is unchanged", () => {
+test("View: the Super Admin batches table opens /admin/batches/<id>; the trainer table (P3.10-A) opens /trainer/batches/<id>; no Edit placeholder (P5.0)", () => {
   const table = strip(src(TABLE));
   assert.match(table, /const detailBasePath = assignment \? "\/admin\/batches" : trainerDetail \? "\/trainer\/batches" : null;/, "the Super Admin view (given `assignment`) keeps its link; the trainer view only when the trainer page asks");
   assert.match(src("src/app/trainer/batches/page.tsx"), /<BatchesTable rows=\{batches\} trainerDetail \/>/, "the trainer page opts in to its own detail route");
-  assert.match(table, /detailBasePath \? router\.push\(`\$\{detailBasePath\}\/\$\{encodeURIComponent\(b\.id\)\}`\) : notImplemented\("View batch"\)/);
-  assert.match(table, /notImplemented\("Edit batch"\)/, "Edit stays out of scope");
+  // P5.0: the "View batch" placeholder fallback was unreachable (every caller sets a detail path) and is gone; the
+  // menu only renders with a detail path. Batch editing isn't built, so "Edit" is no longer offered to anyone.
+  assert.match(table, /\{detailBasePath && \(\s*<Dropdown/, "no menu without a real detail route");
+  assert.match(table, /<DropdownItem onClick=\{\(\) => router\.push\(`\$\{detailBasePath\}\/\$\{encodeURIComponent\(b\.id\)\}`\)\}>\s*<Eye className="h-3\.5 w-3\.5" \/> View/);
+  assert.doesNotMatch(table, /notImplemented|isn't wired up|presentation-only|useToast/, "no placeholder toasts left");
+  assert.doesNotMatch(table, /> Edit\b|Pencil/, "no Edit action (batch editing isn't built)");
   assert.doesNotMatch(src("src/app/trainer/batches/page.tsx"), /assignment=/, "the trainer page passes no assignment → no trainer-assignment controls");
   assert.doesNotMatch(table, /enrollment\.actions|setEnrollment|trainerEnrol/, "no enrolment mutations from the table");
 });
