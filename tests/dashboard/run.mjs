@@ -21,6 +21,8 @@ for (const rel of [
   "src/lib/dashboard/periods.ts",
   "src/lib/dashboard/admin-dashboard.ts",
   "src/lib/dashboard/analytics.ts",
+  // Student Dashboard Phase 1
+  "src/lib/dashboard/student-dashboard.ts",
   "src/repositories/dashboard.repository.core.ts",
   "src/services/dashboard.service.core.ts",
 ]) {

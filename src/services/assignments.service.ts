@@ -9,6 +9,8 @@ import {
   type AssignmentRecord,
   type SubmissionRecord,
 } from "@/repositories/assignments.repository";
+import { classesRepository } from "@/repositories/classes.repository";
+import { pickPendingAssignments, type PendingAssignmentItem } from "@/lib/dashboard/student-dashboard";
 import type { AuthUser } from "@/types/auth";
 import type { ClassWithRelations } from "@/types/class";
 import {
@@ -227,6 +229,41 @@ function toView(a: AssignmentRecord): AssignmentView {
 }
 
 export const assignmentsService = {
+  /**
+   * Student dashboard: the signed-in student's assignments still to submit (published, class not
+   * cancelled, no submission yet — the 0006 rules). The identity is the server-side session only;
+   * no id is accepted from the caller. RLS limits both reads to the student's own scope. Null in
+   * demo mode (there is no demo assignment data).
+   */
+  async listPendingForStudent(now: Date = new Date()): Promise<{ items: PendingAssignmentItem[]; total: number } | null> {
+    if (authConfig.mode === "demo") return null;
+    const user = await requireUser();
+    if (user.role !== "student") throw new AssignmentAuthorizationError("Only students have pending assignments.");
+
+    const batchIds = await classesRepository.findEnrolledBatchIds(user.id);
+    const assignments = await assignmentsRepository.findPublishedInBatches(batchIds);
+    const submissions = await assignmentsRepository.findSubmissions(assignments.map((a) => a.id));
+    const submitted = new Set(submissions.filter((s) => s.student_id === user.id).map((s) => s.assignment_id));
+
+    return pickPendingAssignments(
+      assignments.map((a) => {
+        const cls = Array.isArray(a.classes) ? a.classes[0] ?? null : a.classes;
+        return {
+          id: a.id,
+          classId: a.class_id,
+          title: a.title,
+          dueAt: a.due_at,
+          status: a.status,
+          classTitle: cls?.title ?? "",
+          // A class the student can't read is treated as unavailable, never as open for submission.
+          classStatus: cls?.status ?? "cancelled",
+        };
+      }),
+      submitted,
+      now
+    );
+  },
+
   /**
    * The Assignment tab of a class the caller can already see (the class
    * comes from classesService.getClass, so it is scoped). Null in demo

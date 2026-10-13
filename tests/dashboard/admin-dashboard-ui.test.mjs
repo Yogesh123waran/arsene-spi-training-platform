@@ -244,7 +244,11 @@ test("the dashboard no longer depends on the Performance service; the dedicated 
 test("the old mock dashboard is gone from the Super Admin page; the shared KpiCard and portal dashboards are untouched", () => {
   assert.doesNotMatch(src(PAGE) + src(VIEW), /dashboard\.mock|adminKpis|recentTestResults|recentActivity|courseProgressSegments/);
   assert.match(src("src/components/dashboard/KpiCard.tsx"), /trend: number|trend,/i, "KpiCard keeps its existing contract for the trainer/student portals");
-  assert.match(src("src/components/layout/PortalDashboard.tsx"), /KpiDatum/);
+  // Student Dashboard Phase 1 replaced the portal dashboard's mock KPIs with the student's real metrics
+  // (tests/dashboard/student-dashboard.test.mjs); it still renders the shared KpiCard and never mock data.
+  const portal = src("src/components/layout/PortalDashboard.tsx");
+  assert.match(portal, /<KpiCard/);
+  assert.doesNotMatch(portal, /dashboard\.mock/);
 });
 
 test("batch and course comparison (D2b-2B): from the one analytics response, name order, evidence and comparison wording, current completion, no status bands", () => {

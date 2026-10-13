@@ -45,6 +45,11 @@ export type AssignmentRecord = Pick<
   "id" | "class_id" | "batch_id" | "title" | "instructions" | "resource_url" | "due_at" | "max_score" | "status"
 >;
 
+/** A published assignment with its class's title and status (student dashboard). */
+export type PublishedAssignmentRecord = Pick<ClassAssignmentsRow, "id" | "class_id" | "title" | "due_at" | "status"> & {
+  classes: { title: string; status: string } | { title: string; status: string }[] | null;
+};
+
 export type SubmissionRecord = Pick<
   AssignmentSubmissionsRow,
   "assignment_id" | "student_id" | "status" | "submission_url" | "note" | "submitted_at" | "score" | "feedback" | "reviewed_at"
@@ -92,6 +97,27 @@ export const assignmentsRepository = {
         .order("created_at");
       if (error) throw error;
       return data ?? [];
+    });
+  },
+
+  /**
+   * Student dashboard: PUBLISHED assignments of these batches, with their class (title, status).
+   * RLS is the boundary (a student sees published/closed assignments of enrolled/completed batches
+   * only); the batch list is a second, explicit scope from the caller's own enrolments.
+   */
+  findPublishedInBatches(batchIds: string[]): Promise<PublishedAssignmentRecord[]> {
+    if (batchIds.length === 0) return Promise.resolve([]);
+    return run("findPublishedInBatches", async () => {
+      const supabase = await client();
+      const { data, error } = await supabase
+        .from("class_assignments")
+        .select("id, class_id, title, due_at, status, classes ( title, status )")
+        .in("batch_id", batchIds)
+        .eq("status", "published")
+        .order("due_at")
+        .limit(500);
+      if (error) throw error;
+      return (data ?? []) as unknown as PublishedAssignmentRecord[];
     });
   },
 

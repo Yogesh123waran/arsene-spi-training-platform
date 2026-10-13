@@ -95,6 +95,8 @@ try {
     "src/lib/batches/assign-trainer.ts",
     "src/repositories/batch-trainer.repository.core.ts",
     "src/services/batch-trainer.service.core.ts",
+    // Student Dashboard Phase 2
+    "src/lib/dashboard/student-dashboard.ts",
     // Course Management (0030)
     "src/types/course.ts",
     "src/lib/courses/course-management.ts",
