@@ -922,7 +922,10 @@ export type UserAdminEventTypeColumn =
   | "role_changed"
   | "enrollment_changed"
   | "trainer_assignment_changed"
-  | "user_details_changed";
+  | "user_details_changed"
+  // 0029a (P5.2): invitation recovery for a never-activated placeholder account.
+  | "invitation_recovery_requested"
+  | "invitation_recovered";
 
 /**
  * public.user_admin_events — append-only audit of user-management
@@ -1861,9 +1864,24 @@ export type Database = {
         Args: { p_invitation_id: string; p_sent: boolean; p_auth_user_id?: string | null };
         Returns: Json;
       };
-      /** 0017, the invitee's own session: activate the invited account. Returns { ok, role?, enrolled?, reason? }. */
+      /** 0017 (0029a: bound account only), the invitee's own session: activate the invited account. Returns { ok, role?, enrolled?, reason? }. */
       accept_user_invitation: {
         Args: Record<string, never>;
+        Returns: Json;
+      };
+      /** 0029a, Super Admin's session: request recovery for a never-activated placeholder. Returns { ok, email?, expires_at?, resend_count?, reason?, retry_after_seconds? }. */
+      begin_invitation_recovery: {
+        Args: { p_invitation_id: string };
+        Returns: Json;
+      };
+      /** 0029a, the invitee's own session after an e-mail sign-in link: bind the requested invitation. Returns { ok, bound?, reason? }. */
+      complete_invitation_recovery: {
+        Args: Record<string, never>;
+        Returns: Json;
+      };
+      /** 0029a, Super Admin read: the invitation a placeholder account could recover. Returns { ok, invitation_id?, expires_at?, last_sent_at?, resend_count?, recovery_requested_at? }. */
+      invitation_recovery_candidate: {
+        Args: { p_user_id: string };
         Returns: Json;
       };
     };

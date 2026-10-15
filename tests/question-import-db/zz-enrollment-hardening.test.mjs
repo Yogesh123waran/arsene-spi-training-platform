@@ -13,7 +13,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { PgDatabase } from "./pg-client.mjs";
-import { clientFor, db, ids } from "./harness.mjs";
+import { bindInvitation, clientFor, db, ids } from "./harness.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS = path.resolve(here, "../../supabase/migrations");
@@ -131,6 +131,7 @@ test("G1: invitation acceptance still enrols (source invitation)", async () => {
   const inv = await call(sa(), "create_user_invitation", { p: { email: "eh.invitee@eh.test", role: "student", full_name: "EH Invitee", batch_id: U.eh_B1 } });
   await db.exec(`insert into t.ids values ('eh_ACC', gen_random_uuid()); insert into auth.users (id, email) values (t.id('eh_ACC'), 'eh.invitee@eh.test');`);
   U.eh_ACC = await db.admin("select v from t.ids where k = 'eh_ACC'");
+  await bindInvitation(inv.invitation_id, U.eh_ACC); // 0029a: only the bound account accepts
   assert.deepEqual(await call(as("eh_ACC"), "accept_user_invitation"), { ok: true, role: "student", enrolled: true });
   assert.equal(await statusOf("eh_B1", "eh_ACC"), "enrolled");
   assert.deepEqual((await history("eh_B1", "eh_ACC")).at(-1), { prev: null, new: "enrolled", source: "invitation" });

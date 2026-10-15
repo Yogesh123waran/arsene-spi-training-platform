@@ -22,6 +22,8 @@ const CALLBACK_ERROR_MESSAGES: Record<string, string> = {
   invite_invalid: "That invitation link is invalid, has expired or was already used. Ask your administrator for a new invitation.",
   invite_session_missing: "Your invitation session has ended. Open the invitation link from your email again.",
   invite_failed: "We couldn't open your invitation. Please try again in a moment.",
+  recovery_not_eligible:
+    "That link can only be used to finish setting up an invited account, so you've been signed out. Sign in here with your email and password. If you can't, use “Forgot your password?” or contact your administrator.",
 };
 
 export function LoginForm() {

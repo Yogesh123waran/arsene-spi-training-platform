@@ -20,6 +20,9 @@ for (const rel of [
   "src/lib/auth/invite-acceptance.ts",
   "src/repositories/invitation-acceptance.repository.core.ts",
   "src/services/invitation-acceptance.service.core.ts",
+  // Invitation recovery (P5.2)
+  "src/lib/auth/invitation-recovery.ts",
+  "src/services/invitation-recovery.service.core.ts",
 ]) {
   const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {
     compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },

@@ -24,7 +24,11 @@ export default async function TrainerCoursesPage() {
       {loadError ? (
         <ErrorState title="We couldn't load your courses" description={loadError} />
       ) : (
-        <CoursesGrid courses={courses} basePath="/trainer/courses" />
+        <CoursesGrid
+          courses={courses}
+          basePath="/trainer/courses"
+          empty={{ title: "No courses assigned yet", description: "Courses appear here once you are assigned to a batch." }}
+        />
       )}
     </div>
   );

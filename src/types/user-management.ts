@@ -180,6 +180,23 @@ export interface UserDetail {
   actions: UserActionAvailability;
   /** Only for invited accounts with a bound invitation; null otherwise. */
   invitation: UserInvitationSummary | null;
+  /**
+   * P5.2 (0029a): present only when this invited account is a never-activated placeholder whose address has a
+   * pending, unexpired, UNBOUND invitation it could recover (Auth refused to re-send because it is registered).
+   */
+  recovery?: UserRecoveryCandidate;
+}
+
+/** The invitation a placeholder account can recover with a sign-in link (lifecycle facts only — no address). */
+export interface UserRecoveryCandidate {
+  invitationId: string;
+  expiresAt: string;
+  lastSentAt: string | null;
+  resendCount: number;
+  /** When a Super Admin last REQUESTED a sign-in link for it (recorded before the e-mail is attempted; null = never). */
+  recoveryRequestedAt: string | null;
+  /** Whether the server-side recovery switch is on; when off the panel explains instead of offering the action. */
+  available: boolean;
 }
 
 /** Plain, serializable result of a lifecycle server action. */
@@ -215,6 +232,34 @@ export type InvitationRevokeRefusal = "not_found" | "expired" | "not_pending" | 
 
 /** Result of revoking an invitation: a state change only (nothing is deleted). */
 export type InvitationRevokeOutcome = { ok: true } | { ok: false; reason: InvitationRevokeRefusal };
+
+/** P5.2 (0029a): why the database refused a recovery request (begin_invitation_recovery) plus the raised-error mappings. */
+export type InvitationRecoveryRefusal =
+  | "not_found"
+  | "expired"
+  | "not_pending"
+  | "already_bound"
+  | "not_recoverable"
+  | "cooldown"
+  | "resend_limit"
+  | "permission"
+  | "invalid";
+
+/**
+ * P5.2: result of sending a sign-in link to an already-registered, never-activated invited account.
+ *   sent             — the database recorded the request and the sign-in e-mail was handed to Supabase Auth
+ *   refused          — the database said no; nothing was sent
+ *   delivery_failed  — Auth refused to send (the request stays recorded; it can be retried after the cooldown)
+ *   delivery_unknown — Auth gave no answer; it may or may not have been sent
+ *   unavailable      — sending isn't configured on this server; nothing was attempted
+ */
+export type InvitationRecoveryOutcome =
+  | { kind: "sent"; invitationId: string }
+  | { kind: "refused"; reason: InvitationRecoveryRefusal; invitationId: string | null; retryAfterSeconds?: number }
+  | { kind: "delivery_failed"; invitationId: string; reason: AuthInviteFailure }
+  | { kind: "delivery_unknown"; invitationId: string }
+  /** not_configured: e-mail sending isn't set up; disabled: the server-side recovery switch is off (the default). */
+  | { kind: "unavailable"; invitationId: string | null; reason: "not_configured" | "disabled" };
 
 /**
  * Result of creating and/or sending an invitation. Each kind maps to a

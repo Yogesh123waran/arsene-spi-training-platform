@@ -30,6 +30,9 @@
 --    otherwise be silently set to NULL).
 -- 5. Removal: only a DRAFT course that was never published and that nothing
 --    references (batches, classes, questions) can be deleted (audited).
+--    "Never published" must be proven by its own history (created as a
+--    draft through Course Management); a course that existed before 0030
+--    has no such history and is therefore never deleted.
 --    Active (published) and inactive (archived) courses are kept permanently;
 --    "inactive" is the archived status.
 -- 6. Batches: a client can create a batch only for a PUBLISHED course, and
@@ -43,7 +46,8 @@
 --    create_user_invitation and accept_user_invitation (section 7).
 --
 -- Unchanged: every existing table, column, RLS policy and grant, and every
--- other function. Requires 0020–0029 (and the 0017 helpers).
+-- other function. Requires 0020–0029, 0029a (and the 0017 helpers); the
+-- four replaced functions must be exactly their expected previous versions.
 -- ===================================================================
 
 begin;
@@ -60,16 +64,24 @@ begin
   if to_regclass('public.course_code_seq') is not null or to_regclass('public.course_events') is not null then
     raise exception 'Preflight failed: 0030 already applied?';
   end if;
-  -- Section 7 replaces four functions with their previous text plus one check: require exactly those versions.
-  if coalesce((select p.prosrc from pg_catalog.pg_proc p where p.oid = to_regprocedure('public.admin_set_enrollment(uuid, uuid, public.enrollment_status, text)')), '')
-       not like '%0023: only an available student may be enrolled or re-enrolled.%'
-     or coalesce((select p.prosrc from pg_catalog.pg_proc p where p.oid = to_regprocedure('public.trainer_enroll_student(uuid, uuid)')), '')
-       not like '%0023: only an available student may be enrolled or re-enrolled.%'
-     or coalesce((select p.prosrc from pg_catalog.pg_proc p where p.oid = to_regprocedure('public.create_user_invitation(jsonb)')), '')
-       not like '%-- 0028: Super Admin only%'
-     or coalesce((select p.prosrc from pg_catalog.pg_proc p where p.oid = to_regprocedure('public.accept_user_invitation()')), '')
-       not like '%0022: the invitation''s organization and designation are copied too%' then
-    raise exception 'Preflight failed: admin_set_enrollment / trainer_enroll_student (0023), create_user_invitation (0028) and accept_user_invitation (0022) must be the current versions.';
+  -- Section 7 replaces four functions with their previous text plus one check: require EXACTLY those previous
+  -- versions — the whole body, by a whitespace-insensitive fingerprint (as 0029a does), not a comment marker — so a
+  -- definition that differs in any other way (permissions, transitions, capacity, binding, audit …) is never
+  -- silently overwritten: 0030 stops here and changes nothing.
+  if coalesce((select md5(regexp_replace(p.prosrc, '\s+', ' ', 'g')) from pg_catalog.pg_proc p
+                where p.oid = to_regprocedure('public.admin_set_enrollment(uuid, uuid, public.enrollment_status, text)')), '')
+       <> 'ab35b62993ccd6464b940540bd443e24'   -- 0023
+     or coalesce((select md5(regexp_replace(p.prosrc, '\s+', ' ', 'g')) from pg_catalog.pg_proc p
+                   where p.oid = to_regprocedure('public.trainer_enroll_student(uuid, uuid)')), '')
+       <> '0f37c61f7eac679b128dde27ab905ee1'   -- 0023
+     or coalesce((select md5(regexp_replace(p.prosrc, '\s+', ' ', 'g')) from pg_catalog.pg_proc p
+                   where p.oid = to_regprocedure('public.create_user_invitation(jsonb)')), '')
+       <> 'f86798cd0a6f4e66c06eb2752168c6ab'   -- 0028
+     or coalesce((select md5(regexp_replace(p.prosrc, '\s+', ' ', 'g')) from pg_catalog.pg_proc p
+                   where p.oid = to_regprocedure('public.accept_user_invitation()')), '')
+       <> '96dd1023a79442f8db66e2e5ef5510f1' then   -- 0029a
+    -- P5.2: accept_user_invitation must be the 0029a version (binding rule), so 0030 never re-opens unbound acceptance.
+    raise exception 'Preflight failed: admin_set_enrollment / trainer_enroll_student (0023), create_user_invitation (0028) and accept_user_invitation (0029a) must be the current versions (exact definitions; a different definition is never overwritten). Nothing was changed.';
   end if;
   select string_agg(c, ', ') into v_dup from (
     select lower(course_code) as c from public.courses group by lower(course_code) having count(*) > 1) d;
@@ -221,15 +233,21 @@ as $$
       or exists (select 1 from public.questions q where q.course_id = p_course_id);
 $$;
 
--- The course has been published at some point (recorded since 0030: created as published, or a status
--- change to published). An active or once-published course is never deleted — it is deactivated instead.
+-- The course has (or may have) been published at some point. Conservative: only a course whose history PROVES it
+-- was created as a draft through Course Management (course_created with status 'draft') and never published since
+-- counts as never published. A course that existed before 0030 has no course_created event, so its publication
+-- history is unknown and it is treated as published. An active, once-published or legacy course is never
+-- deleted — it is deactivated instead.
 create function public.course_mgmt_ever_published(p_course_id uuid)
 returns boolean
 language sql
 stable
 set search_path = ''
 as $$
-  select exists (select 1 from public.course_events e
+  select not exists (select 1 from public.course_events e
+                      where e.course_id = p_course_id
+                        and e.event_type = 'course_created' and e.detail ->> 'status' = 'draft')
+      or exists (select 1 from public.course_events e
                   where e.course_id = p_course_id
                     and ((e.event_type = 'course_created' and e.detail ->> 'status' = 'published')
                       or (e.event_type = 'course_status_changed' and e.detail ->> 'to' = 'published')));
@@ -900,8 +918,9 @@ grant execute on function public.admin_course_usage(uuid) to authenticated;
 --                               enrolment_skipped: course_archived so the
 --                               invitee can be told why)
 --    Withdrawal and completion are unaffected. Each function below is the
---    previous definition verbatim (0023 / 0023 / 0028 / 0022) plus that one
---    check; grants are kept by CREATE OR REPLACE.
+--    previous definition verbatim (0023 / 0023 / 0028 / 0029a — checked by
+--    fingerprint in the preflight) plus that one check; grants are kept by
+--    CREATE OR REPLACE.
 -- -------------------------------------------------------------------
 
 -- True while the batch is upcoming and its course archived. The course row is read FOR SHARE, so an
@@ -1222,16 +1241,25 @@ begin
     return jsonb_build_object('ok', false, 'reason', 'not_pending');
   end if;
   select lower(btrim(u.email)) into v_email from auth.users u where u.id = v_uid;
+  -- 0029a: the address's pending invitation (at most one — 0017 unique index), whatever its binding; then the binding decides.
   select * into i from public.user_invitations
-   where email_normalized = v_email and status = 'pending' and (auth_user_id is null or auth_user_id = v_uid)
+   where email_normalized = v_email and status = 'pending'
    order by created_at desc limit 1 for update;
-  if v_email is null or not found then
+  if v_email is null or not found or (i.auth_user_id is not null and i.auth_user_id <> v_uid) then
     return jsonb_build_object('ok', false, 'reason', 'not_pending');
   end if;
   if i.expires_at <= now() then
-    update public.user_invitations set status = 'expired' where id = i.id;
-    perform public.user_mgmt_log('invitation_expired', null, i.id, i.batch_id, '{}'::jsonb);
+    -- 0029a: only the bound account's call marks it expired; an unbound caller never changes an invitation.
+    if i.auth_user_id = v_uid then
+      update public.user_invitations set status = 'expired' where id = i.id;
+      perform public.user_mgmt_log('invitation_expired', null, i.id, i.batch_id, '{}'::jsonb);
+    end if;
     return jsonb_build_object('ok', false, 'reason', 'expired');
+  end if;
+  -- 0029a: never accepted by e-mail match alone — only by the Auth account the invitation e-mail was sent to
+  -- (bound by record_invitation_delivery, or by complete_invitation_recovery after a fresh mailbox check).
+  if i.auth_user_id is null then
+    return jsonb_build_object('ok', false, 'reason', 'resend_required');
   end if;
   if (i.student_code is not null and exists (select 1 from public.students s where lower(s.student_code) = lower(i.student_code)))
      or (i.trainer_code is not null and exists (select 1 from public.trainers t where lower(t.trainer_code) = lower(i.trainer_code))) then

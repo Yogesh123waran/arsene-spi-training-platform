@@ -9,6 +9,9 @@
  *                                        returns the database-owned address
  *   revoke_user_invitation(id, reason)   0017: scope, pending/unexpired, row
  *                                        lock; state change + audit only (P3.9)
+ *   begin_invitation_recovery(id)        0029a: Super Admin; never-activated
+ *                                        placeholder; shared cooldown/cap;
+ *                                        returns the database-owned address (P5.2)
  *
  * Nothing here writes a table directly or decides any rule. Factory
  * without `server-only` so it can be tested against a local database;
@@ -41,6 +44,11 @@ export type RevokeInvitationResult = { ok: true } | { ok: false; reason: string 
 
 export type BeginDeliveryResult =
   | { ok: true; invitationId: string; email: string; expiresAt: string; attempt: "initial" | "resend"; resendCount: number }
+  | { ok: false; reason: string; retryAfterSeconds?: number };
+
+/** P5.2: begin_invitation_recovery's answer — the address to send a sign-in link to, or a refusal code. */
+export type BeginRecoveryResult =
+  | { ok: true; invitationId: string; email: string; expiresAt: string; resendCount: number }
   | { ok: false; reason: string; retryAfterSeconds?: number };
 
 function logDbError(context: string, error: unknown) {
@@ -101,6 +109,26 @@ export function createInvitationsRepository(getClient: () => Promise<Client | nu
           throw new InvitationsRepositoryError();
         }
         return { ok: true, invitationId, email: d.email, expiresAt: d.expires_at, attempt: d.attempt, resendCount: typeof d.resend_count === "number" ? d.resend_count : 0 };
+      }
+      return {
+        ok: false,
+        reason: typeof d.reason === "string" ? d.reason : "unknown",
+        ...(typeof d.retry_after_seconds === "number" ? { retryAfterSeconds: d.retry_after_seconds } : {}),
+      };
+    },
+
+    /**
+     * P5.2: begin_invitation_recovery (0029a) — Super Admin only; records a recovery REQUEST for the address's
+     * never-activated placeholder account (not a binding) and returns the database-owned address to e-mail.
+     */
+    async beginRecovery(invitationId: string): Promise<BeginRecoveryResult> {
+      const d = await call("beginRecovery", (s) => s.rpc("begin_invitation_recovery", { p_invitation_id: invitationId }));
+      if (d.ok === true) {
+        if (typeof d.email !== "string" || typeof d.expires_at !== "string") {
+          logDbError("beginRecovery", "incomplete authorization result");
+          throw new InvitationsRepositoryError();
+        }
+        return { ok: true, invitationId, email: d.email, expiresAt: d.expires_at, resendCount: typeof d.resend_count === "number" ? d.resend_count : 0 };
       }
       return {
         ok: false,

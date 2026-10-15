@@ -310,7 +310,10 @@ test("REGRESSION: Course Detail on a database without migration 0030 — a speci
   // any other failure (including loading the course itself) still shows the error page.
   const detail = src("src/app/admin/courses/[courseId]/page.tsx");
   assert.match(detail, /management = await courseManagementService\.getManagement\(course\.id\);\s*\} catch \(err\) \{[\s\S]*?if \(!\(err instanceof CourseManagementUnavailableError\)\) throw err;/);
-  assert.match(detail, /if \(!management\) \{[\s\S]*?return <CourseDetailView course=\{course\} backHref="\/admin\/courses" \/>;/);
+  assert.match(detail, /if \(!management\) \{[\s\S]*?return <CourseDetailView course=\{course\} backHref="\/admin\/courses" classesPanel=\{classesPanel\} \/>;/);
+  // ...and, only when 0030 is missing (not in demo mode), says why the management controls are absent.
+  assert.match(detail, /if \(!\(err instanceof CourseManagementUnavailableError\)\) throw err;\s*managementMissing = true;/);
+  assert.match(detail, /if \(managementMissing\) \{[\s\S]*?\{COURSE_MIGRATION_MISSING_TITLE\}[\s\S]*?title=\{COURSE_MIGRATION_MISSING_ERROR\}|if \(managementMissing\) \{[\s\S]*?title=\{COURSE_MIGRATION_MISSING_ERROR\}[\s\S]*?\{COURSE_MIGRATION_MISSING_TITLE\}/);
   assert.match(detail, /return <ErrorState title="We couldn't load this course" description="Please try again\." \/>;/);
   assert.match(lib.COURSE_MIGRATION_MISSING_ERROR, /migration 0030_course_management\.sql/);
 });
@@ -334,4 +337,20 @@ test("approved lifecycle wording: Draft / Active / Inactive; Publish / Deactivat
   assert.match(src("src/components/modules/CourseCard.tsx"), /label=\{courseStatusLabel\(course\.status\)\}/);
   assert.match(src("src/components/modules/CourseDetailView.tsx"), /label=\{courseStatusLabel\(course\.status\)\}/);
   assert.match(src("src/components/ui/StatusBadge.tsx"), /\{label \?\? toLabel\(status\)\}/);
+});
+
+test("course lists: a loading state for the admin and trainer course routes; 'no courses at all' is not shown as 'no search results'", () => {
+  for (const [file, label] of [["src/app/admin/courses/loading.tsx", "Loading courses…"], ["src/app/trainer/courses/loading.tsx", "Loading courses…"]]) {
+    assert.match(src(file), new RegExp(`return <LoadingState label="${label}" />;`), file);
+  }
+  const grid = src("src/components/modules/CoursesGrid.tsx");
+  // The empty catalog / no assigned courses state comes first; the search message only when a filter hides courses.
+  assert.match(grid, /if \(courses\.length === 0\) \{\s*return <EmptyState icon=\{BookOpen\} title=\{empty\.title\} description=\{empty\.description\} \/>;/);
+  assert.ok(grid.indexOf("courses.length === 0") < grid.indexOf("No courses match your search"));
+  assert.match(grid, /title: "No courses yet",\s*description: "Add the first course to start the SPI catalog\."/);
+  // Hooks run before the early return (React rules of hooks).
+  assert.ok(grid.indexOf("useMemo(") < grid.indexOf("if (courses.length === 0)"));
+  assert.match(src("src/app/trainer/courses/page.tsx"), /empty=\{\{ title: "No courses assigned yet", description: "Courses appear here once you are assigned to a batch\." \}\}/);
+  // The admin page keeps the default (Super Admin) wording.
+  assert.match(src("src/app/admin/courses/page.tsx"), /<CoursesGrid courses=\{courses\} \/>/);
 });

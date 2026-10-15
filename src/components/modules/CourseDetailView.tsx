@@ -19,6 +19,8 @@ export interface CourseDetailViewProps {
   actions?: ReactNode;
   /** Super Admin only: replaces the read-only module list with the module manager. */
   modulesPanel?: ReactNode;
+  /** The course's classes the viewer may see (CourseClassesList); without it the tab shows its empty state. */
+  classesPanel?: ReactNode;
   /** Super Admin only: content below the tabs (batches using the course, course history). */
   footer?: ReactNode;
 }
@@ -36,7 +38,7 @@ export interface CourseDetailViewProps {
  */
 const LEVEL_LABEL: Record<string, string> = { foundation: "Foundation", intermediate: "Intermediate", advanced: "Advanced" };
 
-export function CourseDetailView({ course, backHref, actions, modulesPanel, footer }: CourseDetailViewProps) {
+export function CourseDetailView({ course, backHref, actions, modulesPanel, classesPanel, footer }: CourseDetailViewProps) {
   const hasProgress = course.progress !== undefined;
   const progress = course.progress ?? 0;
 
@@ -108,11 +110,13 @@ export function CourseDetailView({ course, backHref, actions, modulesPanel, foot
             </TabsContent>
 
             <TabsContent value="classes">
-              <EmptyState
-                icon={CalendarDays}
-                title="No scheduled classes yet"
-                description="Classes for this course will appear here once a batch is scheduled."
-              />
+              {classesPanel ?? (
+                <EmptyState
+                  icon={CalendarDays}
+                  title="No scheduled classes yet"
+                  description="Classes for this course will appear here once a batch is scheduled."
+                />
+              )}
             </TabsContent>
 
             <TabsContent value="materials">

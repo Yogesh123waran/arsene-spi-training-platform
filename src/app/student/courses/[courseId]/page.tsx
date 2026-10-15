@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { ErrorState } from "@/components/ui/ErrorState";
 import { CourseDetailView } from "@/components/modules/CourseDetailView";
+import { CourseClassesList } from "@/components/modules/CourseClassesList";
 import { coursesService } from "@/services/courses.service";
 import type { CourseDetail } from "@/types/course";
 
@@ -20,5 +21,14 @@ export default async function StudentCourseDetailPage({ params }: { params: { co
 
   if (!course) notFound();
 
-  return <CourseDetailView course={course} backHref="/student/courses" />;
+  // This course's classes the student may see (same scope as the Classes pages); null = couldn't be read.
+  const classes = await coursesService.listCourseClasses(course.id);
+
+  return (
+    <CourseDetailView
+      course={course}
+      backHref="/student/courses"
+      classesPanel={<CourseClassesList classes={classes} basePath="/student/classes" />}
+    />
+  );
 }

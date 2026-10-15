@@ -17,7 +17,8 @@ const read = (file) => fs.readFileSync(file, "utf8").replace(/\r\n/g, "\n");
 const migrationFiles = (re) => fs.readdirSync(MIGRATIONS).filter((f) => re.test(f)).sort().map((f) => path.join(MIGRATIONS, f));
 const M0015 = path.join(MIGRATIONS, "0015_exam_integrity_foundation.sql");
 /** The baseline: every migration except 0015 (0015 is what these tests isolate). */
-const migrationsWithout0015 = () => migrationFiles(/^00\d\d_.*\.sql$/).filter((f) => f !== M0015);
+// P5.2: `[a-z]?` also picks up 0029a (0030 requires it), in file order 0029 → 0029a → 0030, as run.mjs does.
+const migrationsWithout0015 = () => migrationFiles(/^00\d\d[a-z]?_.*\.sql$/).filter((f) => f !== M0015);
 
 const BASE_DB = "qi_exam_base_0014";
 const EMPTY_DB = "qi_exam_empty";

@@ -1,14 +1,33 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { BookOpen, Search } from "lucide-react";
 import { Input } from "@/components/ui/Input";
 import { Select } from "@/components/ui/Select";
 import { EmptyState } from "@/components/ui/EmptyState";
 import type { CourseSummary } from "@/types/course";
 import { CourseCard } from "@/components/modules/CourseCard";
 
-export function CoursesGrid({ courses, basePath = "/admin/courses" }: { courses: CourseSummary[]; basePath?: string }) {
+/** Shown when the caller has no courses at all (as opposed to no courses matching the search / filter). */
+export interface CoursesEmptyText {
+  title: string;
+  description: string;
+}
+
+const ADMIN_EMPTY: CoursesEmptyText = {
+  title: "No courses yet",
+  description: "Add the first course to start the SPI catalog.",
+};
+
+export function CoursesGrid({
+  courses,
+  basePath = "/admin/courses",
+  empty = ADMIN_EMPTY,
+}: {
+  courses: CourseSummary[];
+  basePath?: string;
+  empty?: CoursesEmptyText;
+}) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
 
@@ -20,6 +39,10 @@ export function CoursesGrid({ courses, basePath = "/admin/courses" }: { courses:
       return matchesQuery && matchesStatus;
     });
   }, [courses, query, status]);
+
+  if (courses.length === 0) {
+    return <EmptyState icon={BookOpen} title={empty.title} description={empty.description} />;
+  }
 
   return (
     <div className="flex flex-col gap-4">

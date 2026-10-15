@@ -18,7 +18,13 @@
 
 import { revalidatePath } from "next/cache";
 import { invitationsService, InvitationsAuthorizationError, InvitationsInputError } from "./invitations.service";
-import { GENERIC_INVITATION_ERROR, REVOKE_REASON_MESSAGE, REVOKE_SUCCESS_MESSAGE, invitationOutcomeMessage } from "@/lib/user-management/invitations";
+import {
+  GENERIC_INVITATION_ERROR,
+  REVOKE_REASON_MESSAGE,
+  REVOKE_SUCCESS_MESSAGE,
+  invitationOutcomeMessage,
+  recoveryOutcomeMessage,
+} from "@/lib/user-management/invitations";
 import type {
   InvitationActionResult,
   InvitationSendOutcome,
@@ -106,6 +112,25 @@ export async function inviteSuperAdminAction(input: SuperAdminInvitationInput): 
  */
 export async function resendInvitationAction(invitationId: string): Promise<InvitationActionResult> {
   return run("resendInvitation", () => invitationsService.resendInvitation(invitationId));
+}
+
+/**
+ * P5.2: send a sign-in link to the existing, never-activated account of a pending invitation that Auth refused to
+ * re-send (address already registered). Only the invitation id is accepted from the browser; the database decides
+ * eligibility, cooldown and cap and records the request; nothing is bound until the invitee signs in with the link.
+ */
+export async function recoverInvitationAction(invitationId: string): Promise<UserActionResult> {
+  try {
+    const outcome = await invitationsService.recoverInvitation(invitationId);
+    if (outcome.kind !== "unavailable") revalidateUserPages();
+    const message = recoveryOutcomeMessage(outcome);
+    return outcome.kind === "sent" ? { ok: true, message } : { ok: false, error: message };
+  } catch (err) {
+    // These carry messages written to be shown to users.
+    if (err instanceof InvitationsAuthorizationError || err instanceof InvitationsInputError) return { ok: false, error: err.message };
+    console.error("[invitations.actions] recoverInvitation:", err instanceof Error ? err.name : "unknown error");
+    return { ok: false, error: GENERIC_INVITATION_ERROR };
+  }
 }
 
 /**

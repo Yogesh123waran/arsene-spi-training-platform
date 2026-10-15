@@ -345,7 +345,8 @@ const USER_FILES = [
   "src/components/modules/UserDetailPanel.tsx",
 ];
 /** The only database functions the Users module may call — the 0017 Super Admin functions for P3.3. */
-const ALLOWED_RPCS = ["admin_set_account_status", "admin_set_user_role", "admin_update_student", "admin_update_trainer"];
+// P5.2 (0029a): + invitation_recovery_candidate — a Super Admin-only READ (lifecycle facts, never the address).
+const ALLOWED_RPCS = ["admin_set_account_status", "admin_set_user_role", "admin_update_student", "admin_update_trainer", "invitation_recovery_candidate"];
 
 test("source: no Users file imports the service-role client, reads auth.users or the service-role key", () => {
   for (const rel of USER_FILES) {

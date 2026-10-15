@@ -225,7 +225,8 @@ test("revoke action: only the id and reason are forwarded; safe results; user pa
 test("sources: the panel calls server actions only, confirms before revoking, and guards against duplicate resends; reads never select an address or token", () => {
   const panel = code("src/components/modules/UserDetailPanel.tsx");
   assert.match(src("src/components/modules/UserDetailPanel.tsx"), /^"use client";/);
-  assert.match(panel, /import \{ resendInvitationAction, revokeInvitationAction \} from "@\/services\/invitations\.actions";/);
+  // P5.2 adds recoverInvitationAction (the "Send sign-in link" server action) — still server actions only.
+  assert.match(panel, /import \{ recoverInvitationAction, resendInvitationAction, revokeInvitationAction \} from "@\/services\/invitations\.actions";/);
   assert.doesNotMatch(panel, /@\/services\/invitations\.service|@\/repositories\/|@\/lib\/supabase\/|auth\.admin|SUPABASE_SERVICE_ROLE_KEY/);
   // Revoke only from the confirmation dialog.
   assert.match(panel, /title="Revoke this invitation\?"/);

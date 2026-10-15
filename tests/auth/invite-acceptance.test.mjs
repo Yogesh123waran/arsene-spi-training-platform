@@ -97,6 +97,11 @@ test("messages: database refusals map to fixed sentences; anything else is gener
   assert.match(lib.acceptRefusalMessage("not_pending"), /can no longer be used/);
   assert.match(lib.acceptRefusalMessage("expired"), /expired/);
   assert.match(lib.acceptRefusalMessage("code_in_use"), /conflict/);
+  // P5.2 (0029a): an unexpired, unbound invitation — actionable without promising a plain resend (the administrator
+  // may need to send a sign-in link instead); an expired one asks for a NEW invitation, never a resend.
+  assert.match(lib.acceptRefusalMessage("resend_required"), /isn't ready to use yet[\s\S]*new invitation link[\s\S]*newest email/);
+  assert.doesNotMatch(lib.acceptRefusalMessage("expired"), /resend/i);
+  assert.match(lib.acceptRefusalMessage("expired"), /new invitation/);
   for (const r of ["unknown", "error", "toString", "__proto__", "constructor", undefined, 5]) assert.equal(lib.acceptRefusalMessage(r), lib.SETUP_GENERIC_ERROR, String(r));
 });
 
@@ -263,6 +268,7 @@ test("complete: any acceptance refusal after the password update signs out exact
     [{ accept: { ok: false, reason: "not_pending" } }, lib.ACCEPT_REASON_MESSAGE.not_pending],
     [{ accept: { ok: false, reason: "expired" } }, lib.ACCEPT_REASON_MESSAGE.expired],
     [{ accept: { ok: false, reason: "code_in_use" } }, lib.ACCEPT_REASON_MESSAGE.code_in_use],
+    [{ accept: { ok: false, reason: "resend_required" } }, lib.ACCEPT_REASON_MESSAGE.resend_required],
     [{ accept: { ok: false, reason: "something_new" } }, lib.SETUP_GENERIC_ERROR],
     [{ accept: { ok: false, reason: "error" } }, lib.SETUP_GENERIC_ERROR],
   ];
@@ -299,11 +305,27 @@ const ACCEPTANCE_FILES = [
   "src/app/auth/accept/page.tsx",
   "src/components/auth/AcceptInvitationForm.tsx",
 ];
+// P5.2: the invitation-recovery flow is held to exactly the same rules (own session, no service role, Auth and
+// RPC calls only in the acceptance repository core, no table writes, no user-controlled redirect).
+const RECOVERY_FILES = [
+  "src/lib/auth/invitation-recovery.ts",
+  "src/services/invitation-recovery.service.core.ts",
+  "src/services/invitation-recovery.service.ts",
+  "src/services/invitation-recovery.actions.ts",
+  "src/app/auth/recover/page.tsx",
+  "src/app/auth/recover/incomplete/page.tsx",
+  "src/components/auth/RecoveryContinueForm.tsx",
+  "src/components/auth/RecoveryIncompletePanel.tsx",
+];
+// P5.2: the recovery mailer is an Auth call site by design (like the repository core above): it gets the
+// service-role rule, and its own pinned boundary below (exactly one Auth operation, no database access).
+const RECOVERY_MAILER_FILES = ["src/repositories/recovery-mailer.repository.core.ts", "src/repositories/recovery-mailer.repository.ts"];
+const FLOW_FILES = [...ACCEPTANCE_FILES, ...RECOVERY_FILES];
 const strip = (code) => code.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 const importsOf = (code) => [...code.matchAll(/from\s+["']([^"']+)["']/g)].map((m) => m[1]);
 
 test("boundary: no acceptance file touches the service role, the admin client or the Auth Admin repository", () => {
-  for (const rel of ACCEPTANCE_FILES) {
+  for (const rel of [...FLOW_FILES, ...RECOVERY_MAILER_FILES]) {
     assert.ok(exists(rel), rel);
     const code = strip(src(rel));
     for (const spec of importsOf(code)) assert.doesNotMatch(spec, /supabase\/admin|auth-admin/, `${rel} imports ${spec}`);
@@ -313,7 +335,7 @@ test("boundary: no acceptance file touches the service role, the admin client or
 });
 
 test("boundary: verifyOtp and the RPC live only in the repository core; only the accept RPC; no table writes", () => {
-  for (const rel of ACCEPTANCE_FILES) {
+  for (const rel of FLOW_FILES) {
     const code = strip(src(rel));
     if (rel !== "src/repositories/invitation-acceptance.repository.core.ts") {
       assert.doesNotMatch(code, /verifyOtp|\.rpc\(|updateUser\(|\.auth\./, rel);
@@ -321,15 +343,88 @@ test("boundary: verifyOtp and the RPC live only in the repository core; only the
     assert.doesNotMatch(code, /\.(insert|update|upsert|delete)\(/, `${rel}: no table writes`);
   }
   const repo = strip(src("src/repositories/invitation-acceptance.repository.core.ts"));
-  assert.deepEqual([...repo.matchAll(/\.rpc\(\s*["']([a-z_]+)["']/g)].map((m) => m[1]), ["accept_user_invitation"]);
-  assert.deepEqual([...repo.matchAll(/verifyOtp\(\s*\{([^}]*)\}/g)].map((m) => m[1].replace(/\s+/g, " ").trim()), ['type: "invite", token_hash: tokenHash']);
+  // P5.2 adds the recovery pair on the same own-session client: verifyOtp(email) and complete_invitation_recovery.
+  assert.deepEqual([...repo.matchAll(/\.rpc\(\s*["']([a-z_]+)["']/g)].map((m) => m[1]).sort(), ["accept_user_invitation", "complete_invitation_recovery"]);
+  assert.deepEqual([...repo.matchAll(/verifyOtp\(\s*\{([^}]*)\}/g)].map((m) => m[1].replace(/\s+/g, " ").trim()).sort(), ['type: "email", token_hash: tokenHash', 'type: "invite", token_hash: tokenHash']);
+});
+
+// ---- P5.2 Auth-usage guards ------------------------------------------------------------------------------
+// These are source-level GUARDS against straightforward changes (a new Auth call, an alias, optional chaining, a
+// split line, a raw fetch to the Auth REST API, realtime/storage access). Regex checks cannot prove the absence of
+// every possible indirection (e.g. eval, a helper in another module); review still applies.
+
+/** Code without comments and import lines, with property access normalised: `a ?. b`, `a\n  .b` → `a.b`. */
+const accessCode = (rel) =>
+  strip(src(rel))
+    .replace(/^\s*import\b[^;]*;\s*$/gm, "")
+    .replace(/\s*\?\.\s*/g, ".")
+    .replace(/\s*\.\s*(?=[A-Za-z_$])/g, ".");
+/** Every Auth call `x.auth.op(` (after normalisation), in order. */
+const authOps = (code) => [...code.matchAll(/\.auth\.([A-Za-z_$][\w$]*)\(/g)].map((m) => m[1]);
+/** Every reference to `auth` as an identifier/property — each one must be one of the pinned calls (no aliases). */
+const authRefs = (code) => (code.match(/\bauth\b/g) ?? []).length;
+/** Ways of reaching Supabase/Auth other than the injected client's pinned calls. */
+const OTHER_ACCESS = /\bfetch\(|XMLHttpRequest|\baxios\b|\/auth\/v1|\.channel\(|\.removeChannel\(|\.realtime\b|\.schema\(|\.storage\b|\.functions\b|\[\s*["'`]auth["'`]\s*\]|\bcreate(Server|Browser)?Client\b|globalThis|\bprocess\.env\b/;
+
+test("boundary (P5.2): the recovery mailer performs exactly one Auth operation — signInWithOtp, never creating a user — and no other Supabase access", () => {
+  const core = accessCode("src/repositories/recovery-mailer.repository.core.ts");
+  assert.deepEqual(authOps(core), ["signInWithOtp"], "only signInWithOtp — any other Auth operation fails this test");
+  assert.equal(authRefs(core), 1, "the only `auth` reference is that call — no alias (const a = client.auth), destructuring ({ auth }) or re-use");
+  assert.doesNotMatch(core, OTHER_ACCESS, "no raw fetch / Auth REST URL / realtime / storage / functions / bracket access / own client / env");
+  assert.doesNotMatch(core, /\.rpc\(|\.from\(|\.(insert|update|upsert|delete)\(/, "no database access");
+  assert.match(core, /\.auth\.signInWithOtp\(\{ email, options: \{ shouldCreateUser: false, emailRedirectTo: redirectTo \} \}\)/);
+  // The redirect is only passed through (from the configured app URL — invitations.service.ts); nothing request-derived.
+  assert.doesNotMatch(core, /["'`]next["'`]|\.next\b|searchParams|redirect_to|window\.location|document\.referrer|headers\(/);
+  assert.equal((core.match(/\bredirectTo\b/g) ?? []).length, 2, "the parameter and its one pass-through");
+  assert.match(strip(src("src/services/invitations.service.ts")), /recoveryRedirectUrl: \(\) => recoveryRedirectUrl\(process\.env\.NEXT_PUBLIC_APP_URL\)/);
+
+  // The wiring only builds the session-less client: its single `auth` reference is the options key.
+  const wiring = accessCode("src/repositories/recovery-mailer.repository.ts");
+  assert.deepEqual(authOps(wiring), [], "the wiring makes no Auth calls itself");
+  assert.equal(authRefs(wiring), 1, "only the `auth:` options key");
+  assert.match(wiring, /createClient<Database, "public">\(url, publishableKey, \{\s*auth: \{ persistSession: false, autoRefreshToken: false, detectSessionInUrl: false \},\s*\}\)/);
+  assert.equal((wiring.match(/\bcreateClient\(|\bcreateClient</g) ?? []).length, 1, "exactly one client");
+  assert.doesNotMatch(wiring, /\.rpc\(|\.from\(|\bfetch\(|\/auth\/v1|\.channel\(|\.storage\b|\.functions\b|SERVICE_ROLE|service_role/);
+  for (const spec of importsOf(strip(src("src/repositories/recovery-mailer.repository.ts")))) {
+    assert.doesNotMatch(spec, /supabase\/admin|supabase\/server|auth-admin|next\/headers/, `mailer wiring imports ${spec}`);
+  }
+});
+
+test("boundary (P5.2): the acceptance repository core uses exactly its pinned Auth operations on the person's own session", () => {
+  const core = accessCode("src/repositories/invitation-acceptance.repository.core.ts");
+  assert.deepEqual(
+    authOps(core).sort(),
+    ["getSession", "getUser", "signOut", "signOut", "updateUser", "verifyOtp", "verifyOtp"],
+    "verifyOtp (invite, email), getUser, updateUser (password), signOut (default; local-scope in endSession), getSession — nothing else"
+  );
+  assert.equal(authRefs(core), 7, "every `auth` reference is one of those calls — no alias or destructuring");
+  assert.deepEqual([...core.matchAll(/\.auth\.signOut\(([^)]*)\)/g)].map((m) => m[1]).sort(), ["", '{ scope: "local" }']);
+  assert.match(core, /\.auth\.updateUser\(\{ password \}\)/, "only the password is ever updated");
+  assert.doesNotMatch(core, OTHER_ACCESS, "no raw fetch / Auth REST URL / realtime / storage / functions / bracket access / own client / env");
+  assert.doesNotMatch(core, /\.from\(|\.admin\b/, "no direct table access and no Auth Admin API");
 });
 
 test("boundary: no `next` or other user-controlled redirect anywhere in the flow", () => {
-  for (const rel of ACCEPTANCE_FILES) {
+  for (const rel of FLOW_FILES) {
     const code = strip(src(rel)).replace(/["']next\/(navigation|link|cache|headers)["']|["']next["']\s*;|from\s+["']next["']/g, "");
     assert.doesNotMatch(code, /["'`]next["'`]|\.next\b|searchParams\.get\(|redirectTo|redirect_to|window\.location|document\.referrer/, rel);
   }
+  // P5.2 recovery: the fixed destinations only.
+  const recoverPage = strip(src("src/app/auth/recover/page.tsx"));
+  assert.deepEqual([...recoverPage.matchAll(/redirect\(([^)]*\)?)\)/g)].map((m) => m[1]), ['inviteLoginErrorPath("invite_invalid")']);
+  assert.doesNotMatch(strip(src("src/app/auth/recover/incomplete/page.tsx")), /redirect\(|router\./, "the safe page redirects nobody");
+  const recoverForm = strip(src("src/components/auth/RecoveryContinueForm.tsx"));
+  assert.deepEqual([...recoverForm.matchAll(/router\.replace\(([^;]*)\);/g)].map((m) => m[1]), ["result.destination", "recoveryFailurePath(result.code)"]);
+  assert.doesNotMatch(strip(src("src/components/auth/RecoveryIncompletePanel.tsx")), /router\.|redirect\(/, "the safe page's panel navigates nowhere by itself");
+  // Every link in the recovery components goes to one fixed path (no computed or user-supplied href, no raw <a>).
+  const hrefsOf = (code) => [...code.matchAll(/\bhref=(\{[^}]*\}|"[^"]*"|'[^']*')/g)].map((m) => m[1]);
+  assert.deepEqual(hrefsOf(recoverForm), ["{RECOVERY_INCOMPLETE_PATH}"], "Continue form: only the safe page");
+  const incompletePanel = strip(src("src/components/auth/RecoveryIncompletePanel.tsx"));
+  assert.deepEqual(hrefsOf(incompletePanel), ['"/login"'], "safe-page panel: only the normal sign-in page");
+  assert.ok(incompletePanel.indexOf('href="/login"') > incompletePanel.indexOf('state === "ended" ? ('), "…and only once the session is confirmed closed");
+  for (const code of [recoverForm, incompletePanel]) assert.doesNotMatch(code, /<a\b|router\.push\(/, "links only through next/link with the pinned paths");
+  assert.deepEqual(hrefsOf(strip(src("src/app/auth/recover/page.tsx"))).concat(hrefsOf(strip(src("src/app/auth/recover/incomplete/page.tsx")))), [], "the pages render no links of their own");
+  assert.match(strip(src("src/lib/auth/invitation-recovery.ts")), /export const RECOVERY_INCOMPLETE_PATH = "\/auth\/recover\/incomplete";/);
   const confirm = strip(src("src/app/auth/confirm/page.tsx"));
   assert.deepEqual([...confirm.matchAll(/redirect\(([^)]*\)?)\)/g)].map((m) => m[1]), ['inviteLoginErrorPath("invite_invalid")']);
   const accept = strip(src("src/app/auth/accept/page.tsx"));

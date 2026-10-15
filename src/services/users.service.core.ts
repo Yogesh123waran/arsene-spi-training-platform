@@ -63,6 +63,11 @@ export interface UsersServiceDeps {
   pageSize?: number;
   /** The clock used to show a pending invitation past its expiry as expired (tests inject it). */
   now?: () => Date;
+  /**
+   * P5.2: whether recovery e-mails are switched on (server-only setting, default off). Only decides whether the
+   * panel OFFERS "Send sign-in link"; the invitations service still refuses on its own when it is off.
+   */
+  isRecoveryEnabled?: () => boolean;
 }
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -108,7 +113,13 @@ export function createUsersService(deps: UsersServiceDeps) {
     const audit = await deps.repository.listAuditEvents(userId, invitation?.id ?? null);
     // Only a suspended account needs its latest status change (never-activated hint, 0018).
     const latest = record.account_status === "suspended" ? await deps.repository.latestStatusChange(userId) : null;
-    return mapUserDetail(record, audit, viewer.id, latest, invitation, deps.now?.() ?? new Date());
+    // P5.2: an invited account without a pending bound invitation may have an unbound one it can recover with a
+    // sign-in link (the database decides eligibility; this only decides whether the button shows).
+    const recovery =
+      record.account_status === "invited" && invitation?.status !== "pending" && deps.repository.getRecoveryCandidate
+        ? await deps.repository.getRecoveryCandidate(userId)
+        : null;
+    return mapUserDetail(record, audit, viewer.id, latest, invitation, deps.now?.() ?? new Date(), recovery, deps.isRecoveryEnabled?.() === true);
   }
 
   /**

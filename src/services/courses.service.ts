@@ -1,7 +1,9 @@
 import "server-only";
 import { authService } from "./auth.service";
+import { classesService } from "./classes.service";
 import { coursesRepository, CourseRepositoryError, type CourseScope } from "@/repositories/courses.repository";
 import type { AuthUser } from "@/types/auth";
+import type { ClassWithRelations } from "@/types/class";
 import type { CourseDetail, CourseSummary } from "@/types/course";
 
 /**
@@ -56,6 +58,20 @@ export const coursesService = {
   async getCourse(id: string): Promise<CourseDetail | null> {
     const user = await requireUser();
     return coursesRepository.findById(id, resolveScope(user));
+  },
+
+  /**
+   * The course's classes for its Classes tab, scoped exactly like the Classes pages (classesService
+   * resolves the caller: Super Admin all, trainer their own, student their batches'), newest first.
+   * Null when the read fails — the course page still loads and the tab says the classes couldn't be shown.
+   */
+  async listCourseClasses(courseId: string): Promise<ClassWithRelations[] | null> {
+    try {
+      return await classesService.listClasses({ courseId });
+    } catch (err) {
+      console.error("[courses] course classes load failed:", err instanceof Error ? err.message : err);
+      return null;
+    }
   },
 };
 

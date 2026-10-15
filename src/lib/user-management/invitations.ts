@@ -15,6 +15,8 @@ import type {
   AuthInviteFailure,
   InvitationCreateRefusal,
   InvitationDeliverRefusal,
+  InvitationRecoveryOutcome,
+  InvitationRecoveryRefusal,
   InvitationRevokeRefusal,
   InvitationSendOutcome,
 } from "@/types/user-management";
@@ -42,6 +44,24 @@ export function invitationRedirectUrl(appUrl: string | null | undefined): string
   const local = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
   if (url.protocol !== "https:" && !(url.protocol === "http:" && local)) return null;
   return `${url.origin}${INVITATION_CONFIRM_PATH}`;
+}
+
+/**
+ * P5.2: the server-only switch for recovery e-mails (INVITATION_RECOVERY_EMAILS_ENABLED). On ONLY for the exact
+ * string "true"; missing or anything else = off. An APPLICATION-level switch: it decides what the application
+ * offers and does, not what the database functions allow a Super Admin calling them directly.
+ */
+export function invitationRecoveryEnabled(value: string | null | undefined): boolean {
+  return value === "true";
+}
+
+/** P5.2: where an invitation-recovery sign-in link lands (a page that consumes nothing until Continue). */
+export const RECOVERY_CONFIRM_PATH = "/auth/recover";
+
+/** The recovery sign-in redirect — same rules as invitationRedirectUrl (configured app URL only; HTTPS except locally). */
+export function recoveryRedirectUrl(appUrl: string | null | undefined): string | null {
+  const invite = invitationRedirectUrl(appUrl);
+  return invite ? `${new URL(invite).origin}${RECOVERY_CONFIRM_PATH}` : null;
 }
 
 // -------------------------------------------------------------------
@@ -163,7 +183,8 @@ export const DELIVER_REASON_MESSAGE: Record<InvitationDeliverRefusal, string> = 
 };
 
 export const DELIVERY_FAILURE_MESSAGE: Record<AuthInviteFailure, string> = {
-  already_registered: "The email service refused: this address is already registered with a sign-in account. The invitation stays pending.",
+  already_registered:
+    "The email service refused: this address is already registered with a sign-in account. The invitation stays pending. If this person never finished setting up, open their account in Users and send them a sign-in link.",
   rate_limited: "The email service is busy (rate limit). The invitation stays pending; try resending later.",
   address_not_allowed: "The email service isn't allowed to send to this address. Check the project's email (SMTP) settings. The invitation stays pending.",
   invalid_address: "The email service rejected this address. The invitation stays pending.",
@@ -178,6 +199,47 @@ export const REVOKE_REASON_MESSAGE: Record<InvitationRevokeRefusal, string> = {
   permission: "You don't have permission to do that.",
   invalid: "That invitation can't be revoked.",
 };
+
+/** P5.2: begin_invitation_recovery refusals → safe sentences for the Super Admin. */
+export const RECOVERY_REASON_MESSAGE: Record<InvitationRecoveryRefusal, string> = {
+  not_found: "That invitation no longer exists.",
+  expired: "This invitation has expired. Create a new invitation instead.",
+  not_pending: "This invitation is no longer pending. Nothing was sent.",
+  already_bound: "This invitation is already linked to the account. Use Resend invitation instead.",
+  not_recoverable:
+    "A sign-in link can't be sent for this account: it isn't a never-activated invited account with this invitation's address. Nothing was sent.",
+  cooldown: "An email was sent less than a minute ago. Wait a moment before trying again.",
+  resend_limit: "This invitation has been sent the maximum number of times. Revoke it, then invite the address again if needed.",
+  permission: "You don't have permission to do that.",
+  invalid: "A sign-in link can't be sent for this invitation.",
+};
+
+/** A database refusal code → the known recovery reason, or null for anything unexpected (never passed through). */
+export function asRecoveryRefusal(reason: string): InvitationRecoveryRefusal | null {
+  return hasKey(RECOVERY_REASON_MESSAGE, reason) ? reason : null;
+}
+
+/** One safe sentence for a recovery outcome (never Auth or database internals, never the address). */
+export function recoveryOutcomeMessage(o: InvitationRecoveryOutcome): string {
+  switch (o.kind) {
+    case "sent":
+      return "Sign-in link sent. When the person opens it and continues, they can finish setting up their account.";
+    case "refused": {
+      const base = fromMap(RECOVERY_REASON_MESSAGE, o.reason, GENERIC_INVITATION_ERROR);
+      return o.reason === "cooldown" && o.retryAfterSeconds ? `${base} (about ${o.retryAfterSeconds} s)` : base;
+    }
+    case "delivery_failed":
+      return o.reason === "rate_limited"
+        ? "The request was recorded, but the email service is busy (rate limit) and nothing was sent. Try again later."
+        : "The request was recorded, but the sign-in link couldn't be sent. Try again later.";
+    case "delivery_unknown":
+      return "The request was recorded, but we couldn't confirm whether the sign-in link was sent. Wait a minute before trying again.";
+    case "unavailable":
+      return o.reason === "disabled"
+        ? "Sign-in links are turned off on this server until their email setup has been confirmed. Nothing was requested or sent."
+        : "Sign-in links aren't configured on this server. Nothing was sent.";
+  }
+}
 
 /** Shown after a successful revocation: what changed, and what did not. */
 export const REVOKE_SUCCESS_MESSAGE =

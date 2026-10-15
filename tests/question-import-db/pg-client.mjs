@@ -162,7 +162,7 @@ export class PgDatabase {
 }
 
 export class PgClient {
-  /** identity: { role: "authenticated" | "anon" | "service_role", userId?: string, sessionId?: string (the JWT "session_id" claim) } */
+  /** identity: { role: "authenticated" | "anon" | "service_role", userId?: string, sessionId?: string (the JWT "session_id" claim), amr?: { method: string, timestamp: number }[] (the JWT "amr" claim) } */
   constructor(db, identity) {
     this.db = db;
     this.identity = identity;
@@ -184,8 +184,9 @@ export class PgClient {
     return this.execute(`select coalesce(to_jsonb((${query})), 'null'::jsonb)::text`);
   }
   async execute(query) {
-    const { role, userId, sessionId } = this.identity;
-    const claims = userId ? JSON.stringify(sessionId ? { sub: userId, session_id: sessionId } : { sub: userId }) : "";
+    const { role, userId, sessionId, amr } = this.identity;
+    // amr (P5.2): the JWT "amr" claim — the sign-in methods and their Unix timestamps — as Supabase Auth issues it.
+    const claims = userId ? JSON.stringify({ sub: userId, ...(sessionId ? { session_id: sessionId } : {}), ...(amr ? { amr } : {}) }) : "";
     const dbRole = role === "anon" || role === "service_role" ? role : "authenticated";
     const sql = `set role ${dbRole};\nselect set_config('request.jwt.claims', ${quote(claims)}, false);\n${query};\n`;
     const { stdout, stderr, code } = await this.db.run(sql);

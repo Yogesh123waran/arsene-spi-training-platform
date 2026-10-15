@@ -338,8 +338,8 @@ test("boundary: the Auth Admin core does only invite + record; the session repos
   assert.deepEqual(Array.from(admin.matchAll(/auth\.admin\.([a-zA-Z]+)\(/g), (m) => m[1]), ["inviteUserByEmail"]);
   assert.doesNotMatch(admin, /\.from\(|deleteUser|updateUserById|createUser|generateLink|signOut|listUsers|user_metadata|data:\s*\{/);
   const session = code("src/repositories/invitations.repository.core.ts");
-  // P3.9 adds revoke_user_invitation — still the caller's own session, still a database function deciding.
-  assert.deepEqual(Array.from(session.matchAll(/\.rpc\(\s*["']([a-z_]+)["']/g), (m) => m[1]).sort(), ["begin_invitation_delivery", "create_user_invitation", "revoke_user_invitation"]);
+  // P3.9 adds revoke_user_invitation, P5.2 begin_invitation_recovery — still the caller's own session, still a database function deciding.
+  assert.deepEqual(Array.from(session.matchAll(/\.rpc\(\s*["']([a-z_]+)["']/g), (m) => m[1]).sort(), ["begin_invitation_delivery", "begin_invitation_recovery", "create_user_invitation", "revoke_user_invitation"]);
   assert.doesNotMatch(session, /\.from\(|lib\/supabase\/admin|auth\.admin/);
   const service = code("src/services/invitations.service.core.ts");
   assert.doesNotMatch(service, /\.rpc\(|\.from\(|lib\/supabase\/|auth\.admin/, "the service only sequences repository calls");

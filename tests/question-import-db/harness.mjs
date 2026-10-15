@@ -20,6 +20,18 @@ const user = (key, role) => ({ id: ids[key], email: `${key}@test`, fullName: key
 export const USERS = { A: user("A", "admin"), A2: user("A2", "admin"), T1: user("T1", "trainer"), T2: user("T2", "trainer"), T3: user("T3", "trainer"), ST1: user("ST1", "student") };
 
 export const clientFor = (u) => db.client(u ? { role: "authenticated", userId: u.id } : { role: "anon" });
+
+/**
+ * P5.2 (0029a): bind an invitation to its invited Auth account exactly as a successful send does —
+ * begin_invitation_delivery on an active Super Admin's own session, then record_invitation_delivery(sent)
+ * as service_role. Only the bound account can accept (accept_user_invitation, 0029a).
+ */
+export async function bindInvitation(invitationId, authUserId, superAdminId = ids.A) {
+  const begun = await db.client({ role: "authenticated", userId: superAdminId }).rpc("begin_invitation_delivery", { p_invitation_id: invitationId });
+  if (begun.error || begun.data?.ok !== true) throw new Error(`bindInvitation: begin refused ${JSON.stringify(begun.error ?? begun.data)}`);
+  const recorded = await db.client({ role: "service_role" }).rpc("record_invitation_delivery", { p_invitation_id: invitationId, p_sent: true, p_auth_user_id: authUserId });
+  if (recorded.error || recorded.data?.ok !== true) throw new Error(`bindInvitation: record refused ${JSON.stringify(recorded.error ?? recorded.data)}`);
+}
 export const repoFor = (u) => repoCore.createQuestionImportRepository(async () => clientFor(u));
 
 /** Same scope rule as questionsRepository.listManageableCourses, read under the user's RLS. */

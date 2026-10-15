@@ -136,6 +136,10 @@ test("only pending invitations: revoked and accepted are refused; expired is mar
   const email = `${uniq("acc")}@inv.test`;
   const accepted = await invite(sa, { email });
   const uid = await authUser(email);
+  // 0029a: unbound → resend_required; bound by a successful send → accepted.
+  assert.deepEqual(await call(as(uid), "accept_user_invitation"), { ok: false, reason: "resend_required" });
+  await begin(sa, accepted);
+  assert.deepEqual(await record(accepted, true, uid), { ok: true, delivery_status: "sent" });
   assert.equal((await call(as(uid), "accept_user_invitation")).ok, true);
   assert.deepEqual(await begin(sa, accepted), { ok: false, reason: "not_pending", status: "accepted" });
 
@@ -329,8 +333,10 @@ test("D1 never applies to real or tampered accounts", async () => {
   const sa = as(W.idv_SA);
   // Active (accepted) account.
   const email = `${uniq("real")}@inv.test`;
-  await invite(sa, { email });
+  const realInv = await invite(sa, { email });
   const real = await authUser(email);
+  await begin(sa, realInv);
+  await record(realInv, true, real); // 0029a: bound by a successful send
   assert.equal((await call(as(real), "accept_user_invitation")).ok, true);
   assert.equal(await reasonOf(sa, { email }), "account_exists", "active account");
   assert.equal((await err(as(W.idv_T), "create_user_invitation", { p: inviteP({ email, batch_id: W.idv_B }) }))?.code, "42501", "0028: trainers are refused before any address check");

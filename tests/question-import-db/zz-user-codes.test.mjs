@@ -11,7 +11,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { PgDatabase } from "./pg-client.mjs";
-import { db } from "./harness.mjs";
+import { bindInvitation, db } from "./harness.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS = path.resolve(here, "../../supabase/migrations");
@@ -161,6 +161,7 @@ test("9–10. acceptance copies the invitation's code; admin_set_user_role gener
   const inv = await call(sa, "create_user_invitation", { p: student({ email }) });
   const uid = randomUUID();
   await db.exec(`insert into auth.users (id, email) values ('${uid}', '${email}');`);
+  await bindInvitation(inv.invitation_id, uid); // 0029a: only the bound account accepts
   assert.equal((await call(as(uid), "accept_user_invitation")).ok, true);
   assert.equal(await db.admin(`select student_code from public.students where id = '${uid}'`), inv.code);
 

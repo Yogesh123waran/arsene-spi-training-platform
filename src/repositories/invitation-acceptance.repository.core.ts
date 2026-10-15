@@ -3,8 +3,10 @@
  * session client (publishable key + cookies; never the service role):
  *
  *   auth.verifyOtp({ type: "invite", token_hash })   the Continue step
+ *   auth.verifyOtp({ type: "email", token_hash })    P5.2 recovery sign-in link
  *   auth.getUser() / auth.updateUser({ password }) / auth.signOut()
- *   rpc accept_user_invitation()                      0017, unchanged
+ *   rpc accept_user_invitation()                      0017 (0029a: bound account only)
+ *   rpc complete_invitation_recovery()                0029a (P5.2)
  *   profiles role lookup                              fetchProfileRole
  *
  * One client per request (`open()`), so the session established by
@@ -32,6 +34,10 @@ export type AcceptInvitationResult =
       enrolmentSkipped: string | null;
     }
   | { ok: false; reason: string };
+/** P5.2: complete_invitation_recovery() — bound (or already bound to this account), or a refusal code. */
+export type CompleteRecoveryResult = { ok: true } | { ok: false; reason: string };
+/** P5.2: whether the recovery-created session was confirmed gone ("ended") or not ("unconfirmed"). */
+export type EndSessionResult = "ended" | "unconfirmed";
 
 /** Only a code or status — never a message (it could echo personal data). */
 function diagnostic(error: unknown): string {
@@ -62,6 +68,43 @@ function sessionFor(client: Client) {
       } catch (err) {
         logAuth("verifyOtp threw", err);
         return "failed";
+      }
+    },
+
+    /**
+     * P5.2: consumes the one-time passwordless sign-in link (type "email") a Super Admin had sent for invitation
+     * recovery, and stores the person's session (cookies). Same result shape as verifyInvite.
+     */
+    async verifyEmailLink(tokenHash: string): Promise<VerifyInviteResult> {
+      try {
+        const { error } = await client.auth.verifyOtp({ type: "email", token_hash: tokenHash });
+        if (error) {
+          logAuth("verifyOtp (email) refused", error);
+          return "invalid";
+        }
+        return "verified";
+      } catch (err) {
+        logAuth("verifyOtp (email) threw", err);
+        return "failed";
+      }
+    },
+
+    /** P5.2: complete_invitation_recovery() (0029a) on this fresh sign-in — the database decides everything. */
+    async completeRecovery(): Promise<CompleteRecoveryResult> {
+      try {
+        const { data, error } = await client.rpc("complete_invitation_recovery");
+        if (error) {
+          logAuth("complete_invitation_recovery failed", error);
+          return { ok: false, reason: "error" };
+        }
+        const d = asObject(data);
+        if (d?.ok === true) return { ok: true };
+        if (d?.ok === false) return { ok: false, reason: typeof d.reason === "string" ? d.reason : "unknown" };
+        logAuth("complete_invitation_recovery", "unexpected result");
+        return { ok: false, reason: "unknown" };
+      } catch (err) {
+        logAuth("complete_invitation_recovery threw", err);
+        return { ok: false, reason: "error" };
       }
     },
 
@@ -119,6 +162,32 @@ function sessionFor(client: Client) {
       } catch (err) {
         logAuth("accept_user_invitation threw", err);
         return { ok: false, reason: "error" };
+      }
+    },
+
+    /**
+     * P5.2: end the session the recovery flow created, and CONFIRM it is gone from this request's cookies.
+     * `scope: "local"` ends only this session (never the person's other devices). @supabase/auth-js (2.117)
+     * removes the local session through the SSR cookie adapter even when the server call fails and then reports
+     * the error, so the error is logged but not trusted either way: the confirmation is a fresh getSession() read.
+     * Limitation: with @supabase/ssr that read answers from the client's in-memory record of the removal, not from
+     * the browser cookies (written later through the project's setAll) — "ended" does not prove cookie deletion.
+     * "unconfirmed" when that read still finds a session, cannot be made, or anything throws — the caller then
+     * uses the safe page that never redirects to a portal. Never throws; never logs a token or message.
+     */
+    async endSession(): Promise<EndSessionResult> {
+      try {
+        const { error } = await client.auth.signOut({ scope: "local" });
+        if (error) logAuth("signOut (local) reported an error", error);
+        const { data, error: readError } = await client.auth.getSession();
+        if (readError) {
+          logAuth("getSession after signOut failed", readError);
+          return "unconfirmed";
+        }
+        return data?.session ? "unconfirmed" : "ended";
+      } catch (err) {
+        logAuth("signOut (local) threw", err);
+        return "unconfirmed";
       }
     },
 

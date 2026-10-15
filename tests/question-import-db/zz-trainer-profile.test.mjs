@@ -9,7 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PgDatabase } from "./pg-client.mjs";
-import { clientFor, db, ids } from "./harness.mjs";
+import { bindInvitation, clientFor, db, ids } from "./harness.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS = path.resolve(here, "../../supabase/migrations");
@@ -38,6 +38,7 @@ async function inviteAndAccept(key, p) {
   const inv = await call(admin(), "create_user_invitation", { p });
   await db.exec(`insert into t.ids values ('${key}', gen_random_uuid()); insert into auth.users (id, email) values (t.id('${key}'), lower('${p.email}'));`);
   U[key] = await db.admin(`select v from t.ids where k = '${key}'`);
+  await bindInvitation(inv.invitation_id, U[key]); // 0029a: only the bound account accepts
   const accepted = await call(as(key), "accept_user_invitation");
   return { inv, accepted };
 }

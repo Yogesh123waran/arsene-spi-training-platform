@@ -1,10 +1,12 @@
-// Phase 7 P3.5 — invitation acceptance against the real database (0017 accept_user_invitation,
-// unchanged) through the real repository/service modules. Each invitee uses its OWN session
+// Phase 7 P3.5 — invitation acceptance against the real database (accept_user_invitation; since
+// P5.2 / 0029a only the Auth account the invitation is bound to may accept) through the real
+// repository/service modules. Invitations are bound the way a successful send binds them
+// (bindInvitation: begin_invitation_delivery + record_invitation_delivery). Each invitee uses its OWN session
 // client (authenticated, its own user id); Supabase Auth itself (verifyOtp / updateUser /
 // signOut) is a recording stand-in, since only the database decides activation.
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { clientFor, db, ids } from "./harness.mjs";
+import { bindInvitation, clientFor, db, ids } from "./harness.mjs";
 
 const build = process.env.QI_BUILD;
 const { createInvitationAcceptanceRepository } = await import(`${build}/repositories/invitation-acceptance.repository.core.mjs`);
@@ -85,6 +87,7 @@ after(async () => {
 test("the invitee's own session: password, then accept_user_invitation, then the database role's portal; enrolled; replay changes nothing", async () => {
   const inv = await invite("ia.student@ia.test", { batch_id: U.ia_BO });
   await newAuthUser("ia_STU", "ia.student@ia.test");
+  await bindInvitation(inv.invitation_id, U.ia_STU);
   const { calls, service } = serviceFor("ia_STU", "ia.student@ia.test");
   assert.deepEqual(await quiet(() => service.acceptPageState()), { kind: "invited", email: "ia.student@ia.test" }, "invited → the form");
   calls.length = 0;
@@ -106,8 +109,9 @@ test("the invitee's own session: password, then accept_user_invitation, then the
 
 test("trainer and Super Admin invitations route to their own portals (from the database role)", async () => {
   for (const [key, email, role, home] of [["ia_TRN", "ia.trainer@ia.test", "trainer", "/trainer"], ["ia_ADM", "ia.admin@ia.test", "super_admin", "/admin"]]) {
-    await invite(email, { role });
+    const inv = await invite(email, { role });
     await newAuthUser(key, email);
+    await bindInvitation(inv.invitation_id, U[key]);
     const { service } = serviceFor(key, email);
     assert.deepEqual(await quiet(() => service.completeInvitation(PASSWORD, PASSWORD)), { ok: true, home }, key);
     assert.deepEqual(await profile(key), { role, account_status: "active" });
@@ -126,8 +130,9 @@ test("wrong user: another invited account (different email) cannot accept someon
 
 test("expired and revoked invitations never activate: mapped message, signed out, account stays invited", async () => {
   const ex = await invite("ia.expired@ia.test");
-  await db.run(`update public.user_invitations set expires_at = created_at + interval '1 second' where id = '${ex.invitation_id}'; select pg_sleep(1.1);`);
   await newAuthUser("ia_EXP", "ia.expired@ia.test");
+  await bindInvitation(ex.invitation_id, U.ia_EXP); // bound, so the refusal is the expiry itself
+  await db.run(`update public.user_invitations set expires_at = created_at + interval '1 second' where id = '${ex.invitation_id}'; select pg_sleep(1.1);`);
   let f = serviceFor("ia_EXP", "ia.expired@ia.test");
   assert.deepEqual(await quiet(() => f.service.completeInvitation(PASSWORD, PASSWORD)), { ok: false, error: lib.ACCEPT_REASON_MESSAGE.expired, ended: true });
   assert.ok(names(f.calls).includes("signOut"));
@@ -142,10 +147,29 @@ test("expired and revoked invitations never activate: mapped message, signed out
   assert.deepEqual(await profile("ia_REV"), { role: "student", account_status: "invited" });
   assert.equal((await invitation(rv.invitation_id)).status, "revoked");
 
-  // Recovery: the unaccepted placeholder may be invited again (0019 D1) and then accepts normally.
+  // Recovery (P5.2, realistic): the unaccepted placeholder may be invited again (0019 D1). Both people already used
+  // an invitation link and set a password, so their address is confirmed and Supabase Auth REFUSES to invite it again
+  // ("already registered"): the new invitation stays unbound and acceptance says resend_required. A Super Admin
+  // sends a sign-in link (begin_invitation_recovery); the person signs in from it — a fresh e-mail one-time-code
+  // session (JWT amr "otp") — and complete_invitation_recovery binds the invitation; then acceptance works.
   for (const [key, email] of [["ia_EXP", "ia.expired@ia.test"], ["ia_REV", "ia.revoked@ia.test"]]) {
     const again = await invite(email);
     assert.equal(again.ok, true, `${key}: re-invited`);
+    assert.equal((await call(admin(), "begin_invitation_delivery", { p_invitation_id: again.invitation_id })).ok, true);
+    assert.deepEqual(
+      await call(db.client({ role: "service_role" }), "record_invitation_delivery", { p_invitation_id: again.invitation_id, p_sent: false, p_auth_user_id: null }),
+      { ok: true, delivery_status: "failed" },
+      `${key}: Auth refused (already registered) — recorded as failed, nothing bound`
+    );
+    assert.deepEqual(
+      await quiet(() => serviceFor(key, email).service.completeInvitation(PASSWORD, PASSWORD)),
+      { ok: false, error: lib.ACCEPT_REASON_MESSAGE.resend_required, ended: true },
+      `${key}: unbound`
+    );
+    await db.exec(`update public.user_invitations set last_sent_at = now() - interval '61 seconds' where id = '${again.invitation_id}';`); // past the shared cooldown
+    assert.equal((await call(admin(), "begin_invitation_recovery", { p_invitation_id: again.invitation_id })).ok, true, `${key}: recovery requested`);
+    const freshSignIn = db.client({ role: "authenticated", userId: U[key], amr: [{ method: "otp", timestamp: Math.floor(Date.now() / 1000) }] });
+    assert.deepEqual(await call(freshSignIn, "complete_invitation_recovery"), { ok: true, bound: true }, `${key}: bound after the sign-in link`);
     assert.deepEqual(await quiet(() => serviceFor(key, email).service.completeInvitation(PASSWORD, PASSWORD)), { ok: true, home: "/student" }, key);
     assert.deepEqual(await profile(key), { role: "student", account_status: "active" });
     assert.deepEqual(await invitation(again.invitation_id), { status: "accepted", accepted_user_id: U[key], auth_user_id: U[key] });
@@ -166,8 +190,9 @@ test("an invitation bound to a different Auth account cannot be accepted by the 
 });
 
 test("full batch: accepted (active, student portal) without enrolment", async () => {
-  await invite("ia.full@ia.test", { batch_id: U.ia_BF });
+  const inv = await invite("ia.full@ia.test", { batch_id: U.ia_BF });
   await newAuthUser("ia_FULL", "ia.full@ia.test");
+  await bindInvitation(inv.invitation_id, U.ia_FULL);
   const { service } = serviceFor("ia_FULL", "ia.full@ia.test");
   assert.deepEqual(await quiet(() => service.completeInvitation(PASSWORD, PASSWORD)), { ok: true, home: "/student" });
   assert.deepEqual(await profile("ia_FULL"), { role: "student", account_status: "active" });
@@ -177,8 +202,9 @@ test("full batch: accepted (active, student portal) without enrolment", async ()
 test("anonymous callers cannot execute accept_user_invitation; an invalid password never reaches the database", async () => {
   const e = (await clientFor(null).rpc("accept_user_invitation", {})).error;
   assert.equal(e?.code, "42501");
-  await invite("ia.weak@ia.test");
+  const inv = await invite("ia.weak@ia.test");
   await newAuthUser("ia_WEAK", "ia.weak@ia.test");
+  await bindInvitation(inv.invitation_id, U.ia_WEAK);
   const { calls, service } = serviceFor("ia_WEAK", "ia.weak@ia.test");
   assert.equal((await service.completeInvitation("short", "short")).ok, false);
   assert.deepEqual(calls, [], "no Auth call, no RPC");

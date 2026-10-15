@@ -33,12 +33,14 @@ export function isPortalHome(value: unknown): value is PortalHome {
 }
 
 /** Error codes shown on /login (messages live in LoginForm). */
-export type InviteLoginError = "invite_invalid" | "invite_session_missing" | "invite_failed";
+export type InviteLoginError = "invite_invalid" | "invite_session_missing" | "invite_failed" | "recovery_not_eligible";
 
 const INVITE_LOGIN_PATH: Record<InviteLoginError, string> = {
   invite_invalid: "/login?error=invite_invalid",
   invite_session_missing: "/login?error=invite_session_missing",
   invite_failed: "/login?error=invite_failed",
+  // P5.2: a recovery sign-in link used by an account that isn't an eligible invited account (signed out first).
+  recovery_not_eligible: "/login?error=recovery_not_eligible",
 };
 
 /** A fixed /login path for an invite error code; anything unknown becomes invite_failed. */
@@ -149,6 +151,10 @@ export const ACCEPT_REASON_MESSAGE: Record<string, string> = {
   not_pending: "This invitation can no longer be used — it may have been accepted, revoked or replaced. Ask your administrator for a new invitation.",
   expired: "This invitation has expired. Ask your administrator for a new invitation.",
   code_in_use: "Your account couldn't be set up because of a conflict with an existing record. Contact your administrator.",
+  // 0029a: the (unexpired) invitation isn't linked to this account yet — the administrator either resends it or,
+  // when the address is already registered, sends a sign-in link. An expired one is reported as "expired" instead.
+  resend_required:
+    "This invitation isn't ready to use yet. Ask your administrator to send you a new invitation link, then open the newest email you receive.",
 };
 
 export function acceptRefusalMessage(reason: unknown): string {

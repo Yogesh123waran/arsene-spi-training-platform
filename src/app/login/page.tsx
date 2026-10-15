@@ -11,7 +11,6 @@ import { LoginForm } from "@/components/auth/LoginForm";
 import { Logo } from "@/components/layout/Logo";
 import { Footer } from "@/components/layout/Footer";
 import { IndustrialSkyline } from "./IndustrialSkyline";
-import { MicrosoftSignInButton } from "./MicrosoftSignInButton";
 
 export const metadata: Metadata = {
   title: `Sign in | ${siteConfig.productName} | ${siteConfig.companyName}`,
@@ -92,14 +91,6 @@ export default async function LoginPage() {
           <Suspense fallback={null}>
             <LoginForm />
           </Suspense>
-
-          <div className="my-5 flex items-center gap-3">
-            <span className="h-px flex-1 bg-surface-border" />
-            <span className="text-2xs uppercase tracking-wide text-ink-faint">or</span>
-            <span className="h-px flex-1 bg-surface-border" />
-          </div>
-
-          <MicrosoftSignInButton />
 
           {authConfig.demo.enabled && (
             <div className="mt-6 flex items-start gap-3 rounded-lg border border-primary-100 bg-primary-50 px-4 py-3">

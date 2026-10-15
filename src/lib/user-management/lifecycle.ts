@@ -20,6 +20,7 @@ import type {
   UserContactDetails,
   UserDetail,
   UserInvitationSummary,
+  UserRecoveryCandidate,
   UserSummary,
 } from "@/types/user-management";
 import { ROLE_LABEL } from "@/lib/auth/roles";
@@ -280,6 +281,10 @@ const EVENT_LABEL: Record<string, string> = {
   invitation_revoked: "Invitation revoked",
   invitation_expired: "Invitation expired",
   invitation_accepted: "Invitation accepted",
+  // P5.2 (0029a)
+  // Recorded before the e-mail is attempted, so it says "requested", never "sent".
+  invitation_recovery_requested: "Sign-in link requested for the existing account",
+  invitation_recovered: "Invitation linked after sign-in from the email link",
   account_status_changed: "Account status changed",
   role_changed: "Role changed",
   enrollment_changed: "Enrolment changed",
@@ -437,16 +442,45 @@ export function mapInvitation(r: UserInvitationRecord | null, now: Date = new Da
   };
 }
 
+/** P5.2 (0029a): invitation_recovery_candidate's answer for one account (lifecycle facts only). */
+export interface UserRecoveryCandidateRecord {
+  invitation_id: string;
+  expires_at: string;
+  last_sent_at: string | null;
+  resend_count: number;
+  recovery_requested_at: string | null;
+}
+
+/**
+ * A valid candidate → what the panel needs; anything malformed → null (no section). `enabled` is the server-side
+ * recovery switch (default off): it only decides whether the panel offers the action.
+ */
+export function mapRecoveryCandidate(r: UserRecoveryCandidateRecord | null, enabled = false): UserRecoveryCandidate | null {
+  if (!r || !isUuid(r.invitation_id) || typeof r.expires_at !== "string") return null;
+  return {
+    invitationId: r.invitation_id,
+    expiresAt: r.expires_at,
+    lastSentAt: r.last_sent_at,
+    resendCount: Number.isInteger(r.resend_count) && r.resend_count >= 0 ? r.resend_count : 0,
+    recoveryRequestedAt: r.recovery_requested_at,
+    available: enabled === true,
+  };
+}
+
 export function mapUserDetail(
   r: UserDetailRecord,
   audit: UserAuditRecord[],
   viewerId: string,
   latestStatusChange: { detail: Json } | null = null,
   invitation: UserInvitationRecord | null = null,
-  now: Date = new Date()
+  now: Date = new Date(),
+  recoveryCandidate: UserRecoveryCandidateRecord | null = null,
+  recoveryEnabled = false
 ): UserDetail {
   const user = mapUserRecord(r);
   const isSelf = user.id === viewerId;
+  // P5.2: only an invited account can recover an invitation; the key is absent otherwise.
+  const recovery = user.accountStatus === "invited" ? mapRecoveryCandidate(recoveryCandidate, recoveryEnabled) : null;
   return {
     user,
     isSelf,
@@ -457,5 +491,6 @@ export function mapUserDetail(
     actions: actionAvailability(user, isSelf, isNeverActivated(user, latestStatusChange)),
     // Only an invited account has an invitation to manage; anything else shows none.
     invitation: user.accountStatus === "invited" ? mapInvitation(invitation, now) : null,
+    ...(recovery ? { recovery } : {}),
   };
 }

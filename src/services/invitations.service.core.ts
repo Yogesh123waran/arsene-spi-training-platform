@@ -29,14 +29,24 @@ import type { AuthUser } from "@/types/auth";
 import type {
   InvitationCreateRefusal,
   InvitationDeliverRefusal,
+  InvitationRecoveryOutcome,
+  InvitationRecoveryRefusal,
   InvitationRevokeOutcome,
   InvitationRevokeRefusal,
   InvitationSendOutcome,
 } from "@/types/user-management";
-import { asCreateRefusal, asDeliverRefusal, asRevokeRefusal, buildInvitationPayload, type InviteUserInput } from "@/lib/user-management/invitations";
+import {
+  asCreateRefusal,
+  asDeliverRefusal,
+  asRecoveryRefusal,
+  asRevokeRefusal,
+  buildInvitationPayload,
+  type InviteUserInput,
+} from "@/lib/user-management/invitations";
 import { isUuid, normalizeReason } from "@/lib/user-management/lifecycle";
 import { InvitationsFunctionError, InvitationsRepositoryError, type InvitationsRepository } from "@/repositories/invitations.repository.core";
 import type { AuthAdminDelivery, AuthAdminRepository } from "@/repositories/auth-admin.repository.core";
+import type { RecoveryMailerRepository } from "@/repositories/recovery-mailer.repository.core";
 
 export class InvitationsAuthorizationError extends Error {
   constructor(message = "Only Super Admins can send invitations.") {
@@ -60,6 +70,15 @@ export interface InvitationsServiceDeps {
   /** The confirmation redirect from configuration (null = not safely configured). */
   redirectUrl: () => string | null;
   isDemoMode?: () => boolean;
+  /** P5.2: the session-less sign-in e-mail sender (never the service role). Recovery is unavailable without it. */
+  recoveryMailer?: RecoveryMailerRepository;
+  /** P5.2: the recovery sign-in redirect from configuration (null = not safely configured). */
+  recoveryRedirectUrl?: () => string | null;
+  /**
+   * P5.2: server-side switch for recovery e-mails. DISABLED unless this returns true — turned on only after the
+   * Magic Link template and the staging verification are confirmed (docs/runbooks/live-migration-0029a.md).
+   */
+  recoveryEnabled?: () => boolean;
 }
 
 /** Raised database errors → a refusal reason, by SQLSTATE only. */
@@ -213,6 +232,50 @@ export function createInvitationsService(deps: InvitationsServiceDeps) {
       if (result.ok) return { ok: true };
       const refusal: InvitationRevokeRefusal = asRevokeRefusal(result.reason) ?? unexpectedRefusal("revoke", result.reason);
       return { ok: false, reason: refusal };
+    },
+
+    /**
+     * P5.2: send a sign-in link to the existing, never-activated account of a pending UNBOUND invitation whose
+     * address Auth refused to invite again (already registered). begin_invitation_recovery (Super Admin's own
+     * session) decides eligibility, cooldown and cap and records the request — it binds nothing. The e-mail goes
+     * through the session-less mailer to the database-owned address only. The invitation is bound later, only by
+     * complete_invitation_recovery on the invitee's own fresh e-mail sign-in.
+     */
+    async recoverInvitation(invitationId: unknown): Promise<InvitationRecoveryOutcome> {
+      await requireSuperAdmin();
+      if (!isUuid(invitationId)) return { kind: "refused", reason: "not_found", invitationId: null };
+      // Off by default: nothing is recorded or sent until the rollout steps are confirmed and the switch is on.
+      if (deps.recoveryEnabled?.() !== true) return { kind: "unavailable", invitationId, reason: "disabled" };
+      const redirectTo = deps.isDemoMode?.() ? null : deps.recoveryRedirectUrl?.() ?? null;
+      const mailer = deps.recoveryMailer;
+      if (!redirectTo || !mailer || !mailer.isConfigured()) return { kind: "unavailable", invitationId, reason: "not_configured" };
+
+      let begun;
+      try {
+        begun = await deps.invitations.beginRecovery(invitationId);
+      } catch (err) {
+        const reason = raisedReason(err);
+        if (reason === "permission" || reason === "invalid") return { kind: "refused", reason, invitationId };
+        throw err;
+      }
+      if (!begun.ok) {
+        const reason: InvitationRecoveryRefusal = asRecoveryRefusal(begun.reason) ?? unexpectedRefusal("recovery", begun.reason);
+        return {
+          kind: "refused",
+          reason,
+          invitationId,
+          ...(begun.retryAfterSeconds !== undefined ? { retryAfterSeconds: begun.retryAfterSeconds } : {}),
+        };
+      }
+
+      const sent = await mailer.sendSignInLink(begun.email, redirectTo);
+      if (sent.kind === "sent") return { kind: "sent", invitationId };
+      if (sent.kind === "unknown") {
+        logDelivery(invitationId, "recovery_unknown", { auth: sent.diagnostic });
+        return { kind: "delivery_unknown", invitationId };
+      }
+      logDelivery(invitationId, "recovery_failed", { reason: sent.failure, auth: sent.diagnostic });
+      return { kind: "delivery_failed", invitationId, reason: sent.failure };
     },
   };
 }

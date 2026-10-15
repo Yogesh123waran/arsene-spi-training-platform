@@ -18,7 +18,7 @@ import { ACCOUNT_STATUS_LABEL } from "@/lib/user-management/users";
 import { INVITATION_RESEND_LIMIT, LIMITS } from "@/lib/user-management/lifecycle";
 import { outcomeTone } from "@/lib/user-management/invitations";
 import { changeUserRoleAction, setAccountStatusAction, updateUserDetailsAction } from "@/services/users.actions";
-import { resendInvitationAction, revokeInvitationAction } from "@/services/invitations.actions";
+import { recoverInvitationAction, resendInvitationAction, revokeInvitationAction } from "@/services/invitations.actions";
 import { formatDate, formatDateTime } from "@/utils/format";
 import type { UserRole } from "@/types/user";
 import type { UserActionResult, UserDetail } from "@/types/user-management";
@@ -392,6 +392,69 @@ function InvitationSection({ detail }: { detail: UserDetail }) {
   );
 }
 
+/**
+ * P5.2: an invited account that never finished setting up, whose pending invitation could not be re-sent because
+ * the address is already registered. "Send sign-in link" asks the server to e-mail a one-time sign-in link to the
+ * account's own address (the database checks eligibility, cooldown and cap and records the request). Nothing is
+ * linked until the person opens the link and continues; no account is deleted or changed here.
+ */
+function RecoverySection({ detail }: { detail: UserDetail }) {
+  const rec = detail.recovery!;
+  const router = useRouter();
+  const { showToast } = useToast();
+  const [isPending, startTransition] = useTransition();
+  const sending = useRef(false);
+
+  function send() {
+    // Duplicate-submission guard: one request at a time.
+    if (sending.current || isPending) return;
+    sending.current = true;
+    startTransition(async () => {
+      try {
+        const result = await recoverInvitationAction(rec.invitationId);
+        if (result.ok) showToast({ variant: "success", title: result.message });
+        // Not "no link was sent": when the result is uncertain a link may have gone out — the description says which.
+        else showToast({ variant: "error", title: "Sign-in link not confirmed as sent", description: result.error });
+      } finally {
+        sending.current = false;
+        router.refresh();
+      }
+    });
+  }
+
+  return (
+    <section aria-labelledby="ud-recovery" className="flex flex-col gap-2 border-t border-surface-border pt-4">
+      <h3 id="ud-recovery" className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wide text-ink-muted">
+        <Mail className="h-3.5 w-3.5" aria-hidden /> Invitation not linked
+      </h3>
+      <p className="text-xs text-ink-muted">
+        This person has a pending invitation (expires {formatDateTime(rec.expiresAt)}), but it can&apos;t be resent because their address is
+        already registered.{" "}
+        {rec.available
+          ? "Send them a sign-in link: after they open it and continue, they can finish setting up their account."
+          : "A sign-in link will be the way to let them finish setting up their account once sign-in links are turned on."}
+      </p>
+      <p className="text-xs text-ink-muted">
+        {/* recovery_requested_at is recorded before the e-mail is attempted: it is a request time, not a delivery time. */}
+        {rec.recoveryRequestedAt ? `Last sign-in link requested ${formatDateTime(rec.recoveryRequestedAt)}` : "No sign-in link requested yet"}
+        {rec.resendCount > 0 ? ` · emails resent ${rec.resendCount} of ${INVITATION_RESEND_LIMIT} times` : ""}
+      </p>
+      {/* The server-side switch (default off) decides whether the action is offered; the server refuses either way. */}
+      {rec.available ? (
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant="secondary" isLoading={isPending} disabled={rec.resendCount >= INVITATION_RESEND_LIMIT} onClick={send}>
+            <Send className="h-3.5 w-3.5" /> Send sign-in link
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs text-ink-muted">
+          Sign-in links are turned off on this server until their email setup has been confirmed, so this can&apos;t be sent yet.
+        </p>
+      )}
+    </section>
+  );
+}
+
 // -------------------------------------------------------------------
 // Panel
 // -------------------------------------------------------------------
@@ -498,6 +561,8 @@ export function UserDetailPanel({ detail, closeHref, initialEdit = false }: { de
         </div>
 
         {detail.invitation && <InvitationSection key={detail.invitation.id} detail={detail} />}
+
+        {detail.recovery && <RecoverySection key={detail.recovery.invitationId} detail={detail} />}
 
         {detail.contact && (
           <section aria-labelledby="ud-details" className="flex flex-col gap-3 border-t border-surface-border pt-4">

@@ -25,7 +25,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AccountStatusColumn, AppRoleColumn, Database, Json } from "@/lib/supabase/types";
 import { KEYSET_PAGE_SIZE, readAllByKeyset } from "@/lib/supabase/paging";
 import type { UserProfileRecord } from "@/lib/user-management/users";
-import type { UserAuditRecord, UserDetailRecord, UserInvitationRecord } from "@/lib/user-management/lifecycle";
+import type { UserAuditRecord, UserDetailRecord, UserInvitationRecord, UserRecoveryCandidateRecord } from "@/lib/user-management/lifecycle";
 
 type Client = SupabaseClient<Database, "public">;
 
@@ -192,6 +192,41 @@ export function createUsersRepository(getClient: () => Promise<Client | null>, o
         s.from("user_invitations").select(USER_INVITATION_SELECT).eq("auth_user_id", userId).order("created_at", { ascending: false }).limit(1)
       );
       return rows?.[0] ?? null;
+    },
+
+    /**
+     * P5.2 (0029a): the pending, unexpired, UNBOUND invitation this never-activated placeholder account could
+     * recover with a sign-in link — lifecycle facts only, never the address. invitation_recovery_candidate is
+     * Super Admin only; null when there is none (or anything goes wrong — it only decides whether a button shows).
+     */
+    async getRecoveryCandidate(userId: string): Promise<UserRecoveryCandidateRecord | null> {
+      let supabase: Client | null;
+      try {
+        supabase = await getClient();
+      } catch (err) {
+        logDbError("getRecoveryCandidate (client)", err);
+        return null;
+      }
+      if (!supabase) return null;
+      try {
+        const { data, error } = await supabase.rpc("invitation_recovery_candidate", { p_user_id: userId });
+        if (error) {
+          logDbError("getRecoveryCandidate", error);
+          return null;
+        }
+        const d = data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : null;
+        if (d?.ok !== true || typeof d.invitation_id !== "string" || typeof d.expires_at !== "string") return null;
+        return {
+          invitation_id: d.invitation_id,
+          expires_at: d.expires_at,
+          last_sent_at: typeof d.last_sent_at === "string" ? d.last_sent_at : null,
+          resend_count: typeof d.resend_count === "number" ? d.resend_count : 0,
+          recovery_requested_at: typeof d.recovery_requested_at === "string" ? d.recovery_requested_at : null,
+        };
+      } catch (err) {
+        logDbError("getRecoveryCandidate", err);
+        return null;
+      }
     },
 
     /**

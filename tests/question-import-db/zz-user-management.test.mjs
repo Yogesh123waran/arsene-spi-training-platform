@@ -10,7 +10,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { PgDatabase } from "./pg-client.mjs";
-import { clientFor, db, ids } from "./harness.mjs";
+import { bindInvitation, clientFor, db, ids } from "./harness.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS = path.resolve(here, "../../supabase/migrations");
@@ -257,6 +257,7 @@ test("acceptance: the invited account with the matching email becomes active wit
   const p = inviteP({ email: "Accept.Me@um.test", batch_id: U.um_B1, phone: "123", organization: "ACME" });
   const inv = await call(sa, "create_user_invitation", { p });
   await newAuthUser("um_ACC", "accept.me@um.test");
+  await bindInvitation(inv.invitation_id, U.um_ACC); // 0029a: only the bound account accepts
   assert.equal((await profile("um_ACC")).account_status, "invited");
   assert.deepEqual(await call(as("um_ACC"), "accept_user_invitation"), { ok: true, role: "student", enrolled: true });
   const pr = await profile("um_ACC");
@@ -278,18 +279,21 @@ test("acceptance: trainer and Super Admin roles; no batch room → accepted with
   const sa = as("um_SA");
   const trInv = await call(sa, "create_user_invitation", { p: inviteP({ email: "acc.trainer@um.test", role: "trainer", specializations: ["DCS"] }) });
   await newAuthUser("um_ACT", "acc.trainer@um.test");
+  await bindInvitation(trInv.invitation_id, U.um_ACT);
   assert.deepEqual(await call(as("um_ACT"), "accept_user_invitation"), { ok: true, role: "trainer", enrolled: false });
   assert.deepEqual(await db.admin(`select to_json(x) from (select r.trainer_code, r.status, d.specializations from public.trainers r join public.trainer_details d on d.trainer_id = r.id where r.id = '${U.um_ACT}') x`),
     { trainer_code: trInv.code, status: "active", specializations: ["DCS"] });
 
-  await call(sa, "create_user_invitation", { p: inviteP({ email: "acc.admin@um.test", role: "super_admin" }) });
+  const saInv = await call(sa, "create_user_invitation", { p: inviteP({ email: "acc.admin@um.test", role: "super_admin" }) });
   await newAuthUser("um_ACA", "acc.admin@um.test");
+  await bindInvitation(saInv.invitation_id, U.um_ACA);
   assert.deepEqual(await call(as("um_ACA"), "accept_user_invitation"), { ok: true, role: "super_admin", enrolled: false });
   assert.equal(await db.admin(`select count(*) from public.students where id = '${U.um_ACA}'`) + await db.admin(`select count(*) from public.trainers where id = '${U.um_ACA}'`), 0);
 
   // Full batch (UM-BF has 1 seat, taken): accepted, not enrolled.
-  await call(sa, "create_user_invitation", { p: inviteP({ email: "acc.full@um.test", batch_id: U.um_BF }) });
+  const fullInv = await call(sa, "create_user_invitation", { p: inviteP({ email: "acc.full@um.test", batch_id: U.um_BF }) });
   await newAuthUser("um_ACF", "acc.full@um.test");
+  await bindInvitation(fullInv.invitation_id, U.um_ACF);
   assert.deepEqual(await call(as("um_ACF"), "accept_user_invitation"), { ok: true, role: "student", enrolled: false });
   assert.equal(await enrolment("um_BF", "um_ACF"), null);
   assert.deepEqual((await events(`event_type = 'invitation_accepted' and target_user_id = '${U.um_ACF}'`))[0].detail, { role: "student", enrolled: false });
@@ -297,14 +301,16 @@ test("acceptance: trainer and Super Admin roles; no batch room → accepted with
   // No invitation for this address, expired, revoked, code taken meanwhile: still invited, nothing created.
   await newAuthUser("um_NOINV", "nobody@um.test");
   const ex = await call(sa, "create_user_invitation", { p: inviteP({ email: "acc.expired@um.test" }) });
-  await db.run(`update public.user_invitations set expires_at = created_at + interval '1 second' where id = '${ex.invitation_id}'; select pg_sleep(1.1);`);
   await newAuthUser("um_ACX", "acc.expired@um.test");
+  await bindInvitation(ex.invitation_id, U.um_ACX); // bound, so the refusal is the expiry itself
+  await db.run(`update public.user_invitations set expires_at = created_at + interval '1 second' where id = '${ex.invitation_id}'; select pg_sleep(1.1);`);
   const rv = await call(sa, "create_user_invitation", { p: inviteP({ email: "acc.revoked@um.test" }) });
   await call(sa, "revoke_user_invitation", { p_invitation_id: rv.invitation_id });
   await newAuthUser("um_ACR", "acc.revoked@um.test");
   const cf = await call(sa, "create_user_invitation", { p: inviteP({ email: "acc.conflict@um.test" }) });
   await db.exec(`update public.user_invitations set student_code = 'UM-S4' where id = '${cf.invitation_id}';`); // test-only: code taken since
   await newAuthUser("um_ACC2", "acc.conflict@um.test");
+  await bindInvitation(cf.invitation_id, U.um_ACC2); // bound, so the refusal is the code conflict itself
   for (const [key, reason] of [["um_NOINV", "not_pending"], ["um_ACX", "expired"], ["um_ACR", "not_pending"], ["um_ACC2", "code_in_use"]]) {
     assert.deepEqual(await call(as(key), "accept_user_invitation"), { ok: false, reason }, key);
     const pr = await profile(key);
@@ -345,7 +351,8 @@ test("last active Super Admin: concurrent mutual suspension / demotion can never
   let r = await db.run(`drop database if exists ${RACE_DB} with (force);\ncreate database ${RACE_DB};`);
   assert.equal(r.code, 0, r.stderr);
   const race = tmpDb(RACE_DB);
-  for (const f of [path.join(here, "fixtures/bootstrap.sql"), ...fs.readdirSync(MIGRATIONS).filter((x) => /^00\d\d_.*\.sql$/.test(x)).sort().map((x) => path.join(MIGRATIONS, x)), path.join(here, "fixtures/seed.sql")]) {
+  // P5.2: `[a-z]?` also picks up 0029a (0030 requires it), in file order 0029 → 0029a → 0030, as run.mjs does.
+  for (const f of [path.join(here, "fixtures/bootstrap.sql"), ...fs.readdirSync(MIGRATIONS).filter((x) => /^00\d\d[a-z]?_.*\.sql$/.test(x)).sort().map((x) => path.join(MIGRATIONS, x)), path.join(here, "fixtures/seed.sql")]) {
     r = await race.run(read(f));
     assert.equal(r.code, 0, `${path.basename(f)}: ${r.stderr}`);
   }
