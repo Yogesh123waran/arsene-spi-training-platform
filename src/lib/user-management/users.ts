@@ -68,6 +68,36 @@ export interface UserProfileRecord {
   trainers: OneOrMany<UserTrainerRecord>;
 }
 
+/**
+ * The name an account was invited with and when it accepted, from its ACCEPTED invitation (user_invitations,
+ * read under the Super Admin's own session — RLS user_invitations_admin_select). The only identity a Super Admin
+ * account has: it has no student/trainer record. Never the invitation's address, a token or Auth data, and
+ * never a pending, revoked or expired invitation.
+ */
+export interface UserIdentityRecord {
+  id?: string;
+  accepted_user_id: string;
+  full_name: string | null;
+  accepted_at: string | null;
+}
+
+/** One identity per account: the most recently accepted invitation (then the larger invitation id, for a stable choice). */
+export function identityIndex(records: readonly UserIdentityRecord[] | null | undefined): Map<string, UserIdentityRecord> {
+  const index = new Map<string, UserIdentityRecord>();
+  for (const r of records ?? []) {
+    if (!r || typeof r.accepted_user_id !== "string") continue;
+    const kept = index.get(r.accepted_user_id);
+    const newer = !kept || (r.accepted_at ?? "") > (kept.accepted_at ?? "") || ((r.accepted_at ?? "") === (kept.accepted_at ?? "") && (r.id ?? "") > (kept.id ?? ""));
+    if (newer) index.set(r.accepted_user_id, r);
+  }
+  return index;
+}
+
+const trimmed = (v: string | null | undefined): string | null => {
+  const t = v?.trim();
+  return t ? t : null;
+};
+
 export function one<T>(value: OneOrMany<T>): T | null {
   if (Array.isArray(value)) return value[0] ?? null;
   return value ?? null;
@@ -225,8 +255,12 @@ const emailOf = (details: OneOrMany<{ email: string | null }>): string | null =>
   return email ? email : null;
 };
 
-/** One profile (with whatever domain data the viewer could read) → one Users row. */
-export function mapUserRecord(r: UserProfileRecord): UserSummary {
+/**
+ * One profile (with whatever domain data the viewer could read) → one Users row. The domain record stays the
+ * source of name and email; the accepted invitation (`identity`) only fills a missing NAME — which is how a
+ * Super Admin account gets its name. It never provides an email.
+ */
+export function mapUserRecord(r: UserProfileRecord, identity: UserIdentityRecord | null = null): UserSummary {
   const role = DB_ROLE[r.role] ?? null;
   const student = one(r.students);
   const trainer = one(r.trainers);
@@ -255,9 +289,12 @@ export function mapUserRecord(r: UserProfileRecord): UserSummary {
     (student ? emailOf(student.student_details) : null) ??
     (trainer ? emailOf(trainer.trainer_details) : null);
 
+  // The accepted invitation fills only a missing name (a Super Admin has no record); never an email.
+  const invited = identity && identity.accepted_user_id === r.id ? identity : null;
+
   return {
     id: r.id,
-    name: named?.full_name?.trim() || null,
+    name: named?.full_name?.trim() || trimmed(invited?.full_name),
     email,
     role,
     // Unknown values cannot exist (enum); never present one as active.
@@ -301,8 +338,14 @@ export function compareUsers(a: UserSummary, b: UserSummary): number {
 }
 
 /** The requested page (clamped to the last page) of the filtered, sorted rows, plus totals. */
-export function buildUserListPage(records: UserProfileRecord[], filters: UserListFilters, pageSize: number = USERS_PAGE_SIZE): UserListPage {
-  const all = records.map(mapUserRecord);
+export function buildUserListPage(
+  records: UserProfileRecord[],
+  filters: UserListFilters,
+  pageSize: number = USERS_PAGE_SIZE,
+  identities: readonly UserIdentityRecord[] = []
+): UserListPage {
+  const index = identityIndex(identities);
+  const all = records.map((r) => mapUserRecord(r, index.get(r.id) ?? null));
   const totals = {
     all: all.length,
     byStatus: { invited: 0, active: 0, suspended: 0 } as Record<AccountStatus, number>,

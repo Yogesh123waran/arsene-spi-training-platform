@@ -18,7 +18,8 @@
  */
 import type { AuthUser } from "@/types/auth";
 import type { UserDetail, UserListPage } from "@/types/user-management";
-import { USERS_PAGE_SIZE, buildUserListPage, parseUserListFilters } from "@/lib/user-management/users";
+import { USERS_PAGE_SIZE, buildUserListPage, identityIndex, one, parseUserListFilters, type UserIdentityRecord } from "@/lib/user-management/users";
+import type { UserAuditRecord } from "@/lib/user-management/lifecycle";
 import {
   DETAILS_REASON_MESSAGE,
   REMOVE_AUDIT_REASON,
@@ -105,6 +106,42 @@ export function createUsersService(deps: UsersServiceDeps) {
     return outcome;
   }
 
+  /**
+   * Accepted-invitation identities (Super Admin view only: every caller has passed requireSuperAdmin). An
+   * identity is an improvement, never a requirement: a failed read (already logged by the repository) leaves
+   * the names out instead of failing the page.
+   */
+  async function acceptedIdentities(userIds?: readonly string[]): Promise<UserIdentityRecord[]> {
+    if (!deps.repository.listAcceptedIdentities) return [];
+    try {
+      return await deps.repository.listAcceptedIdentities(userIds);
+    } catch {
+      return [];
+    }
+  }
+
+  /** History actors other than the viewer → their name: own student/trainer record first, else accepted invitation. */
+  async function actorNames(audit: UserAuditRecord[], viewerId: string): Promise<Map<string, string>> {
+    const ids = [...new Set(audit.map((a) => a.actor_id).filter((id): id is string => typeof id === "string" && id !== viewerId))];
+    const names = new Map<string, string>();
+    if (ids.length === 0) return names;
+    if (deps.repository.listRecordNames) {
+      try {
+        for (const r of await deps.repository.listRecordNames(ids)) {
+          const name = (one(r.students)?.full_name ?? one(r.trainers)?.full_name)?.trim();
+          if (name) names.set(r.id, name);
+        }
+      } catch {
+        // Logged by the repository; the history keeps the actor ids.
+      }
+    }
+    for (const [id, identity] of identityIndex(await acceptedIdentities(ids.filter((id) => !names.has(id))))) {
+      const name = identity.full_name?.trim();
+      if (name) names.set(id, name);
+    }
+    return names;
+  }
+
   async function loadDetail(viewer: AuthUser, userId: string): Promise<UserDetail | null> {
     const record = await deps.repository.getProfile(userId);
     if (!record) return null;
@@ -119,7 +156,11 @@ export function createUsersService(deps: UsersServiceDeps) {
       record.account_status === "invited" && invitation?.status !== "pending" && deps.repository.getRecoveryCandidate
         ? await deps.repository.getRecoveryCandidate(userId)
         : null;
-    return mapUserDetail(record, audit, viewer.id, latest, invitation, deps.now?.() ?? new Date(), recovery, deps.isRecoveryEnabled?.() === true);
+    const identity = identityIndex(await acceptedIdentities([userId])).get(userId) ?? null;
+    return mapUserDetail(record, audit, viewer.id, latest, invitation, deps.now?.() ?? new Date(), recovery, deps.isRecoveryEnabled?.() === true, {
+      record: identity,
+      actorNames: await actorNames(audit, viewer.id),
+    });
   }
 
   /**
@@ -152,7 +193,9 @@ export function createUsersService(deps: UsersServiceDeps) {
       await requireSuperAdmin();
       const filters = parseUserListFilters(searchParams);
       const records = deps.isDemoMode?.() ? [] : await deps.repository.listProfiles();
-      return buildUserListPage(records, filters, deps.pageSize ?? USERS_PAGE_SIZE);
+      // Super Admin accounts have no student/trainer record: their name (only — never an email) comes from the accepted invitation.
+      const identities = records.length > 0 ? await acceptedIdentities() : [];
+      return buildUserListPage(records, filters, deps.pageSize ?? USERS_PAGE_SIZE, identities);
     },
 
     /** One account with its contact details, history and available actions; null if unknown/unreadable. */

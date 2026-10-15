@@ -243,7 +243,14 @@ test("sources: the panel calls server actions only, confirms before revoking, an
 
   const usersRepo = code("src/repositories/users.repository.core.ts");
   assert.match(usersRepo, /export const USER_INVITATION_SELECT = "id, status, expires_at, last_sent_at, resend_count";/);
-  assert.doesNotMatch(usersRepo, /\.from\("user_invitations"\)\.select\((?!USER_INVITATION_SELECT)/, "only the fixed column list");
+  // The Super Admin identity fallback adds exactly ONE more fixed list: the name an ACCEPTED invitation was made
+  // for and when it was accepted — never the address, a token, a code or Auth data.
+  assert.match(usersRepo, /export const USER_IDENTITY_SELECT = "id, accepted_user_id, full_name, accepted_at";/);
+  assert.doesNotMatch(usersRepo, /\.from\("user_invitations"\)\.select\((?!USER_INVITATION_SELECT\)|USER_IDENTITY_SELECT\))/, "only the two fixed column lists");
+  assert.equal((usersRepo.match(/\.from\("user_invitations"\)\.select\(USER_IDENTITY_SELECT\)\.eq\("status", "accepted"\)/g) ?? []).length, 1, "identities come from accepted invitations only");
+  for (const [, name, list] of usersRepo.matchAll(/export const (USER_INVITATION_SELECT|USER_IDENTITY_SELECT) = "([^"]*)"/g)) {
+    assert.doesNotMatch(list, /\b(email|email_normalized|auth_user_id|token\w*|student_code|trainer_code|phone|organization|designation)\b|auth\./, `${name} reads no address, token, code, contact or Auth data`);
+  }
   assert.doesNotMatch(usersRepo, /\.(insert|update|upsert|delete)\(/, "reads only");
   const service = code("src/services/invitations.service.core.ts");
   assert.doesNotMatch(service, /\.rpc\(|\.from\(|lib\/supabase\//, "the service still only sequences repository calls");

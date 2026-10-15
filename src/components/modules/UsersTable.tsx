@@ -173,7 +173,7 @@ export function UsersTable({ data, basePath, selectedId = null }: { data: UserLi
                         aria-current={u.id === selectedId ? "true" : undefined}
                         className={u.name ? "block truncate text-sm font-medium text-ink hover:text-signal-blue hover:underline" : "block truncate text-sm italic text-ink-muted hover:text-signal-blue hover:underline"}
                       >
-                        {u.name ?? "No name on record"}
+                        {u.name ?? "Name not recorded"}
                       </Link>
                       <p className="truncate text-xs text-ink-muted">{u.email ?? "—"}</p>
                       <p className="truncate font-mono text-2xs text-ink-faint" title={u.id}>

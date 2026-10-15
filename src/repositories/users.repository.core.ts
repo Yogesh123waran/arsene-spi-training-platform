@@ -3,8 +3,10 @@
  * public.profiles with each account's student/trainer record, contact
  * details (student_details / trainer_details) and batches, the account's
  * audit history (user_admin_events), an invited account's latest
- * invitation (user_invitations, lifecycle columns only — P3.9), and the
- * 0017 Super Admin functions.
+ * invitation (user_invitations, lifecycle columns only — P3.9), the name
+ * and acceptance time of ACCEPTED invitations (the only identity a Super
+ * Admin account has; never the address — used by the Super Admin Users
+ * view only), and the 0017 Super Admin functions.
  *
  * Always the caller's own session (never the service role): RLS decides
  * every row read, and every change goes through a 0017 SECURITY DEFINER
@@ -24,7 +26,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AccountStatusColumn, AppRoleColumn, Database, Json } from "@/lib/supabase/types";
 import { KEYSET_PAGE_SIZE, readAllByKeyset } from "@/lib/supabase/paging";
-import type { UserProfileRecord } from "@/lib/user-management/users";
+import type { OneOrMany, UserIdentityRecord, UserProfileRecord } from "@/lib/user-management/users";
 import type { UserAuditRecord, UserDetailRecord, UserInvitationRecord, UserRecoveryCandidateRecord } from "@/lib/user-management/lifecycle";
 
 type Client = SupabaseClient<Database, "public">;
@@ -77,6 +79,22 @@ export const AUDIT_HISTORY_LIMIT = 25;
 
 /** The invitation columns the detail panel needs (P3.9) — never the address, a token or Auth data. */
 export const USER_INVITATION_SELECT = "id, status, expires_at, last_sent_at, resend_count";
+
+/**
+ * The identity of an account from its ACCEPTED invitation: the name a Super Admin account was invited with
+ * (it has no student/trainer record) and when it accepted. Read only for the Super Admin Users view — never the
+ * invitation's address, a token or Auth data.
+ */
+export const USER_IDENTITY_SELECT = "id, accepted_user_id, full_name, accepted_at";
+
+/** Names of history actors: their own student/trainer record name (the Super Admin view resolves the rest). */
+export const USER_NAME_SELECT = "id, students!students_id_fkey ( full_name ), trainers!trainers_id_fkey ( full_name )";
+
+export interface UserNameRecord {
+  id: string;
+  students: OneOrMany<{ full_name: string | null }>;
+  trainers: OneOrMany<{ full_name: string | null }>;
+}
 
 /** What a 0017 function answered: { ok: true, ... } or { ok: false, reason }. */
 export interface UsersFunctionOutcome {
@@ -181,6 +199,39 @@ export function createUsersRepository(getClient: () => Promise<Client | null>, o
       const byId = new Map<number, UserAuditRecord>();
       for (const r of [...own, ...((await recent("invitation_id", invitationId)) ?? [])]) byId.set(r.id, r);
       return [...byId.values()].sort((a, b) => b.id - a.id).slice(0, AUDIT_HISTORY_LIMIT);
+    },
+
+    /**
+     * Name and acceptance time of ACCEPTED invitations (never the address) — the identity of accounts without a
+     * student/trainer record (Super Admins). Caller's own session: RLS (user_invitations_admin_select) returns
+     * every row only to a Super Admin; a trainer sees at most their own invitations, a student none. Every
+     * accepted invitation when `userIds` is omitted (the Users list), else those of the given accounts.
+     */
+    async listAcceptedIdentities(userIds?: readonly string[]): Promise<UserIdentityRecord[]> {
+      if (userIds && userIds.length === 0) return [];
+      const supabase = await client("listAcceptedIdentities");
+      try {
+        return await readAllByKeyset<UserIdentityRecord & { id: string }>((afterId, limit) => {
+          // status = 'accepted' ⇔ accepted_user_id and accepted_at are set (constraint user_invitations_accepted_ok, 0017).
+          let q = supabase.from("user_invitations").select(USER_IDENTITY_SELECT).eq("status", "accepted");
+          if (userIds) q = q.in("accepted_user_id", [...userIds]);
+          if (afterId) q = q.gt("id", afterId);
+          return q.order("id").limit(limit) as unknown as PromiseLike<{ data: (UserIdentityRecord & { id: string })[] | null; error: unknown }>;
+        }, pageSize);
+      } catch (err) {
+        logDbError("listAcceptedIdentities", err);
+        throw new UsersRepositoryError();
+      }
+    },
+
+    /** The given accounts' own student/trainer record names (history actors), RLS-scoped; [] for no ids. */
+    async listRecordNames(userIds: readonly string[]): Promise<UserNameRecord[]> {
+      if (userIds.length === 0) return [];
+      return (
+        (await read<UserNameRecord[]>("listRecordNames", (s) =>
+          s.from("profiles").select(USER_NAME_SELECT).in("id", [...userIds]) as unknown as PromiseLike<{ data: UserNameRecord[] | null; error: unknown }>
+        )) ?? []
+      );
     },
 
     /**

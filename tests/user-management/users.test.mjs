@@ -277,6 +277,143 @@ test("service: demo mode shows an empty list instead of reading or inventing acc
   assert.equal(page.totals.all, 0);
 });
 
+// ---------------------------------------------------------------- Super Admin identity (accepted invitation)
+const identity = (userId, name, acceptedAt = "2026-09-02T10:00:00+00:00", id = uuid(8000 + ++seq)) => ({ id, accepted_user_id: userId, full_name: name, accepted_at: acceptedAt });
+
+test("identity: a Super Admin gets the name of its accepted invitation — never an email; records keep precedence", () => {
+  const sa = profile({ role: "super_admin" });
+  const u = U.mapUserRecord(sa, identity(sa.id, "  Asha Super  "));
+  assert.equal(u.name, "Asha Super");
+  assert.equal(u.email, null, "an invitation never provides an email");
+  assert.equal(U.mapUserRecord(sa).name, null, "no accepted invitation → no name");
+  assert.equal(U.mapUserRecord(sa, identity(sa.id, "   ")).name, null, "a blank invited name is no name");
+  assert.equal(U.mapUserRecord(sa, identity(uuid(999), "Someone Else")).name, null, "another account's invitation is ignored");
+  // Student / trainer: their own record stays the source of name and email.
+  const st = profile({ role: "student", students: student("Record Name", "R1") });
+  const s = U.mapUserRecord(st, identity(st.id, "Invited Name"));
+  assert.equal(s.name, "Record Name");
+  assert.equal(s.email, "r1@example.test");
+  const tr = profile({ role: "trainer", trainers: trainer("Trainer Record", "T9") });
+  assert.equal(U.mapUserRecord(tr, identity(tr.id, "Invited Name")).name, "Trainer Record");
+  // A record without a name falls back to the invitation's name, still without taking its email.
+  const blank = profile({ role: "trainer", trainers: trainer("  ", "T8", { trainer_details: null }) });
+  const b = U.mapUserRecord(blank, identity(blank.id, "Invited Trainer"));
+  assert.equal(b.name, "Invited Trainer");
+  assert.equal(b.email, null);
+});
+
+test("identity: one per account — the most recently accepted invitation, stable on ties; junk ignored", () => {
+  const id = uuid(4242);
+  const index = U.identityIndex([
+    identity(id, "Older", "2026-01-01T00:00:00+00:00", uuid(1)),
+    identity(id, "Newer", "2026-05-01T00:00:00+00:00", uuid(2)),
+    identity(id, "Same time, smaller id", "2026-05-01T00:00:00+00:00", uuid(0)),
+    null,
+    { accepted_user_id: null, full_name: "x", accepted_at: null },
+  ]);
+  assert.equal(index.size, 1);
+  assert.equal(index.get(id).full_name, "Newer");
+  assert.equal(U.identityIndex(undefined).size, 0);
+});
+
+test("identity: the list uses identities for names, search and sort; totals and rows are unchanged", () => {
+  const sa = profile({ role: "super_admin" });
+  const st = profile({ role: "student", students: student("Zed Student", "Z1") });
+  const without = U.buildUserListPage([sa, st], F(), 50);
+  const withIds = U.buildUserListPage([sa, st], F(), 50, [identity(sa.id, "Asha Super")]);
+  assert.deepEqual(withIds.totals, without.totals);
+  assert.deepEqual(withIds.rows.map((r) => r.name), ["Asha Super", "Zed Student"], "named Super Admin sorts by name");
+  assert.deepEqual(without.rows.map((r) => r.name), ["Zed Student", null], "unnamed accounts sort last");
+  assert.deepEqual(U.buildUserListPage([sa, st], F({ q: "asha" }), 50, [identity(sa.id, "Asha Super")]).rows.map((r) => r.id), [sa.id]);
+});
+
+function identityRepo(o = {}) {
+  const calls = [];
+  const sa = o.sa ?? profile({ role: "super_admin" });
+  const repository = {
+    listProfiles: async () => (calls.push("listProfiles"), [sa]),
+    getProfile: async (id) => (calls.push("getProfile"), { ...sa, id }),
+    listAuditEvents: async () => (calls.push("listAuditEvents"), o.audit ?? []),
+    latestStatusChange: async () => (calls.push("latestStatusChange"), null),
+    listAcceptedIdentities: async (ids) => {
+      calls.push(["listAcceptedIdentities", ids ?? "all"]);
+      if (o.identityFails) throw new Error("boom");
+      return (o.identities ?? [identity(sa.id, "Asha Super")]).filter((r) => !ids || ids.includes(r.accepted_user_id));
+    },
+    listRecordNames: async (ids) => {
+      calls.push(["listRecordNames", ids]);
+      return (o.recordNames ?? []).filter((r) => ids.includes(r.id));
+    },
+  };
+  return { calls, repository, sa };
+}
+
+test("identity service: trainers, students and signed-out callers get nothing — not even an identity read", async () => {
+  for (const user of [null, { ...ADMIN, role: "trainer" }, { ...ADMIN, role: "student" }]) {
+    const { calls, repository, sa } = identityRepo();
+    const svc = createUsersService({ repository, getCurrentUser: async () => user });
+    await assert.rejects(svc.listUsers({}), UsersAuthorizationError);
+    await assert.rejects(svc.getUserDetail(sa.id), UsersAuthorizationError);
+    assert.deepEqual(calls, [], `no read at all for ${user?.role ?? "anonymous"}`);
+  }
+});
+
+test("identity service: a Super Admin's list reads identities once, after the profiles; demo mode reads neither", async () => {
+  const { calls, repository, sa } = identityRepo();
+  const page = await createUsersService({ repository, getCurrentUser: async () => ADMIN }).listUsers({});
+  assert.deepEqual(calls, ["listProfiles", ["listAcceptedIdentities", "all"]]);
+  assert.equal(page.rows.find((r) => r.id === sa.id).name, "Asha Super");
+  assert.equal(page.rows.find((r) => r.id === sa.id).email, null);
+  const demo = identityRepo();
+  await createUsersService({ repository: demo.repository, getCurrentUser: async () => ADMIN, isDemoMode: () => true }).listUsers({});
+  assert.deepEqual(demo.calls, []);
+});
+
+test("identity service: a failed identity read leaves names out instead of failing the page", async () => {
+  const { repository, sa } = identityRepo({ identityFails: true });
+  const svc = createUsersService({ repository, getCurrentUser: async () => ADMIN });
+  const page = await svc.listUsers({});
+  assert.equal(page.rows[0].name, null);
+  const detail = await svc.getUserDetail(sa.id);
+  assert.equal(detail.user.name, null);
+  assert.equal(detail.invitationAcceptedAt, null);
+});
+
+test("identity service: the detail shows the account's invited name, acceptance time and named history actors", async () => {
+  const OTHER_SA = uuid(7001);
+  const TRAINER = uuid(7002);
+  const UNKNOWN = uuid(7003);
+  const sa = profile({ role: "super_admin" });
+  const audit = [
+    { id: 4, occurred_at: "2026-09-04T00:00:00Z", event_type: "role_changed", actor_id: ADMIN.id, detail: {} },
+    { id: 3, occurred_at: "2026-09-03T00:00:00Z", event_type: "account_status_changed", actor_id: OTHER_SA, detail: {} },
+    { id: 2, occurred_at: "2026-09-02T00:00:00Z", event_type: "user_details_changed", actor_id: TRAINER, detail: {} },
+    { id: 1, occurred_at: "2026-09-01T00:00:00Z", event_type: "invitation_accepted", actor_id: UNKNOWN, detail: {} },
+    { id: 0, occurred_at: "2026-08-31T00:00:00Z", event_type: "invitation_created", actor_id: null, detail: {} },
+  ];
+  const { calls, repository } = identityRepo({
+    sa,
+    audit,
+    identities: [identity(sa.id, "Asha Super", "2026-09-01T09:00:00+00:00"), identity(OTHER_SA, "Bala Super"), identity(TRAINER, "Old Invited Name")],
+    recordNames: [{ id: TRAINER, students: null, trainers: { full_name: "Trainer Record Name" } }],
+  });
+  const detail = await createUsersService({ repository, getCurrentUser: async () => ADMIN }).getUserDetail(sa.id);
+  assert.equal(detail.user.name, "Asha Super");
+  assert.equal(detail.user.email, null);
+  assert.equal(detail.invitationAcceptedAt, "2026-09-01T09:00:00+00:00");
+  assert.deepEqual(
+    detail.history.map((h) => [h.actor, h.actorName ?? null]),
+    [["you", null], [OTHER_SA, "Bala Super"], [TRAINER, "Trainer Record Name"], [UNKNOWN, null], [null, null]],
+    "you / invited name / own record name first / unknown keeps its id / system"
+  );
+  // The viewer itself is never looked up; record names first, invitations only for the rest.
+  assert.deepEqual(calls.filter((c) => Array.isArray(c) && c[0] === "listRecordNames"), [["listRecordNames", [OTHER_SA, TRAINER, UNKNOWN]]]);
+  assert.deepEqual(calls.filter((c) => Array.isArray(c) && c[0] === "listAcceptedIdentities"), [
+    ["listAcceptedIdentities", [sa.id]],
+    ["listAcceptedIdentities", [OTHER_SA, UNKNOWN]],
+  ]);
+});
+
 // ---------------------------------------------------------------- repository (stand-in client)
 function keysetClient(rows, log) {
   return {
@@ -318,6 +455,56 @@ test("repository: missing client or database error → generic error, no detail 
   } finally {
     console.error = err;
   }
+});
+
+test("repository: identities come only from ACCEPTED invitations, with a fixed name-only column list; names from records", async () => {
+  const { USER_IDENTITY_SELECT, USER_NAME_SELECT } = await import(`${build}/repositories/users.repository.core.mjs`);
+  assert.equal(USER_IDENTITY_SELECT, "id, accepted_user_id, full_name, accepted_at");
+  assert.doesNotMatch(USER_IDENTITY_SELECT, /email|token|auth_user_id|code|phone|password|meta/i);
+  assert.doesNotMatch(USER_NAME_SELECT, /email|details|auth|token|phone/i);
+  const ops = [];
+  const client = {
+    from(table) {
+      ops.push(["from", table]);
+      const b = {
+        select: (cols) => (ops.push(["select", cols]), b),
+        eq: (c, v) => (ops.push(["eq", c, v]), b),
+        not: (c, op, v) => (ops.push(["not", c, op, v]), b),
+        in: (c, v) => (ops.push(["in", c, v]), b),
+        gt: (c, v) => (ops.push(["gt", c, v]), b),
+        order: (c) => (ops.push(["order", c]), b),
+        limit: (n) => (ops.push(["limit", n]), b),
+        then: (res, rej) => Promise.resolve({ data: [], error: null }).then(res, rej),
+      };
+      return b;
+    },
+  };
+  const repo = createUsersRepository(async () => client);
+  await repo.listAcceptedIdentities([uuid(1), uuid(2)]);
+  assert.deepEqual(ops.slice(0, 4), [
+    ["from", "user_invitations"],
+    ["select", USER_IDENTITY_SELECT],
+    ["eq", "status", "accepted"],
+    ["in", "accepted_user_id", [uuid(1), uuid(2)]],
+  ]);
+  ops.length = 0;
+  await repo.listAcceptedIdentities();
+  assert.ok(!ops.some((o) => o[0] === "in"), "the list reads every accepted invitation (RLS-scoped)");
+  assert.ok(ops.some((o) => o[0] === "eq" && o[1] === "status" && o[2] === "accepted"));
+  ops.length = 0;
+  assert.deepEqual(await repo.listAcceptedIdentities([]), []);
+  assert.deepEqual(await repo.listRecordNames([]), []);
+  assert.deepEqual(ops, [], "no ids → no request");
+  await repo.listRecordNames([uuid(3)]);
+  assert.deepEqual(ops.slice(0, 3), [["from", "profiles"], ["select", USER_NAME_SELECT], ["in", "id", [uuid(3)]]]);
+});
+
+test("source: an account without any name is labelled 'Name not recorded' in the Super Admin list and panel", () => {
+  for (const rel of ["src/components/modules/UsersTable.tsx", "src/components/modules/UserDetailPanel.tsx"]) {
+    assert.match(src(rel), /u\.name \?\? "Name not recorded"/, rel);
+    assert.doesNotMatch(src(rel), /No name on record/, rel);
+  }
+  assert.match(src("src/components/modules/UserDetailPanel.tsx"), /h\.actorName \? \(\s*<>· by \{h\.actorName\}<\/>/);
 });
 
 test("repository select: only profile/domain/batch columns — nothing from auth, no secrets", () => {

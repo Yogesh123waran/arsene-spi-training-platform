@@ -29,6 +29,7 @@ import {
   mapUserRecord,
   one,
   type OneOrMany,
+  type UserIdentityRecord,
   type UserProfileRecord,
   type UserStudentRecord,
   type UserTrainerRecord,
@@ -321,12 +322,16 @@ export function describeEvent(eventType: string, detail: Json): string {
   }
 }
 
-export function mapAuditRecord(r: UserAuditRecord, viewerId: string): UserAuditEntry {
+/** `actorNames`: actor id → name, resolved for the Super Admin view only; an unknown actor keeps its id. */
+export function mapAuditRecord(r: UserAuditRecord, viewerId: string, actorNames: ReadonlyMap<string, string> | null = null): UserAuditEntry {
+  const actor = r.actor_id === null ? null : r.actor_id === viewerId ? "you" : r.actor_id;
+  const actorName = actor !== null && actor !== "you" ? actorNames?.get(actor)?.trim() : undefined;
   return {
     id: r.id,
     occurredAt: r.occurred_at,
     summary: describeEvent(r.event_type, r.detail),
-    actor: r.actor_id === null ? null : r.actor_id === viewerId ? "you" : r.actor_id,
+    actor,
+    ...(actorName ? { actorName } : {}),
   };
 }
 
@@ -475,9 +480,12 @@ export function mapUserDetail(
   invitation: UserInvitationRecord | null = null,
   now: Date = new Date(),
   recoveryCandidate: UserRecoveryCandidateRecord | null = null,
-  recoveryEnabled = false
+  recoveryEnabled = false,
+  /** The account's accepted invitation and the names of its history's actors (Super Admin view only). */
+  identity: { record?: UserIdentityRecord | null; actorNames?: ReadonlyMap<string, string> | null } = {}
 ): UserDetail {
-  const user = mapUserRecord(r);
+  const accepted = identity.record && identity.record.accepted_user_id === r.id ? identity.record : null;
+  const user = mapUserRecord(r, accepted);
   const isSelf = user.id === viewerId;
   // P5.2: only an invited account can recover an invitation; the key is absent otherwise.
   const recovery = user.accountStatus === "invited" ? mapRecoveryCandidate(recoveryCandidate, recoveryEnabled) : null;
@@ -487,7 +495,8 @@ export function mapUserDetail(
     hasStudentRecord: one(r.students) !== null,
     hasTrainerRecord: one(r.trainers) !== null,
     contact: mapContactDetails(r, user),
-    history: audit.map((a) => mapAuditRecord(a, viewerId)),
+    history: audit.map((a) => mapAuditRecord(a, viewerId, identity.actorNames ?? null)),
+    invitationAcceptedAt: accepted?.accepted_at ?? null,
     actions: actionAvailability(user, isSelf, isNeverActivated(user, latestStatusChange)),
     // Only an invited account has an invitation to manage; anything else shows none.
     invitation: user.accountStatus === "invited" ? mapInvitation(invitation, now) : null,

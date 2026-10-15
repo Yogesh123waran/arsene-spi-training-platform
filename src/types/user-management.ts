@@ -51,9 +51,9 @@ export interface UserBatchSummary {
 export interface UserSummary {
   /** profiles.id (= the auth user id). */
   id: string;
-  /** Domain record full name; null when the account has no domain record. */
+  /** Domain record full name, else the name of the account's accepted invitation (Super Admins); null when neither exists. */
   name: string | null;
-  /** From student_details / trainer_details only; null when none is readable. */
+  /** From student_details / trainer_details only; null when none is readable (never an invitation's address). */
   email: string | null;
   /** Application role (super_admin → "admin"); null only for an unrecognised value. */
   role: UserRole | null;
@@ -137,6 +137,8 @@ export interface UserAuditEntry {
   summary: string;
   /** "you" when the viewer performed it; otherwise the actor's id, or null for system changes. */
   actor: string | null;
+  /** The actor's name when known (Super Admin view only); absent for "you", system changes and unknown names. */
+  actorName?: string;
 }
 
 /**
@@ -177,6 +179,8 @@ export interface UserDetail {
   hasTrainerRecord: boolean;
   contact: UserContactDetails | null;
   history: UserAuditEntry[];
+  /** When the account's invitation was accepted (from that accepted invitation); null when unknown. */
+  invitationAcceptedAt: string | null;
   actions: UserActionAvailability;
   /** Only for invited accounts with a bound invitation; null otherwise. */
   invitation: UserInvitationSummary | null;

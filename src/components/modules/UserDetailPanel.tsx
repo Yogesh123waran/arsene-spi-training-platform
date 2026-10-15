@@ -485,7 +485,7 @@ export function UserDetailPanel({ detail, closeHref, initialEdit = false }: { de
           <div className="flex min-w-0 items-center gap-3">
             <Avatar name={u.name ?? "?"} tone={u.name ? "blue" : "neutral"} />
             <div className="min-w-0">
-              <p className="truncate text-base font-semibold text-ink">{u.name ?? "No name on record"}</p>
+              <p className="truncate text-base font-semibold text-ink">{u.name ?? "Name not recorded"}</p>
               <p className="truncate text-sm text-ink-muted">{u.email ?? "—"}</p>
               <p className="truncate font-mono text-2xs text-ink-faint">{u.id}</p>
             </div>
@@ -510,6 +510,16 @@ export function UserDetailPanel({ detail, closeHref, initialEdit = false }: { de
               <StatusBadge status={u.accountStatus} />
               <span className="text-xs text-ink-faint">since {formatDate(u.accountStatusChangedAt)}</span>
             </div>
+            <dl className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-0.5 text-xs">
+              <dt className="text-ink-faint">Account created</dt>
+              <dd className="text-ink-muted">{formatDate(u.createdAt)}</dd>
+              {detail.invitationAcceptedAt && (
+                <>
+                  <dt className="text-ink-faint">Invitation accepted</dt>
+                  <dd className="text-ink-muted">{formatDate(detail.invitationAcceptedAt)}</dd>
+                </>
+              )}
+            </dl>
             <div className="flex flex-wrap gap-2">
               {a.suspend && (
                 <Button size="sm" variant="danger" onClick={() => setStatusTarget("suspended")}>
@@ -593,7 +603,17 @@ export function UserDetailPanel({ detail, closeHref, initialEdit = false }: { de
                   <span className="whitespace-nowrap text-xs text-ink-faint">{formatDateTime(h.occurredAt)}</span>
                   <span className="text-ink">{h.summary}</span>
                   <span className="text-xs text-ink-muted">
-                    {h.actor === null ? "· system" : h.actor === "you" ? "· by you" : <>· by <span className="font-mono">{h.actor.slice(0, 8)}</span></>}
+                    {h.actor === null ? (
+                      "· system"
+                    ) : h.actor === "you" ? (
+                      "· by you"
+                    ) : h.actorName ? (
+                      <>· by {h.actorName}</>
+                    ) : (
+                      <>
+                        · by <span className="font-mono">{h.actor.slice(0, 8)}</span>
+                      </>
+                    )}
                   </span>
                 </li>
               ))}

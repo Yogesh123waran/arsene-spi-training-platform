@@ -192,7 +192,9 @@ test("source: the panel offers recovery only with a candidate and sends only the
   assert.equal((panel.match(/onClick=\{send\}/g) ?? []).length, 1, "the only trigger is inside the available branch");
   const usersWiring = strip(src("src/services/users.service.ts"));
   assert.match(usersWiring, /isRecoveryEnabled: \(\) => invitationRecoveryEnabled\(process\.env\.INVITATION_RECOVERY_EMAILS_ENABLED\)/);
-  assert.match(strip(src("src/services/users.service.core.ts")), /deps\.isRecoveryEnabled\?\.\(\) === true\)/);
+  // The switch reaches mapUserDetail as a strict `=== true` (now followed by the identity argument).
+  assert.match(strip(src("src/services/users.service.core.ts")), /deps\.isRecoveryEnabled\?\.\(\) === true, \{/);
+  assert.doesNotMatch(strip(src("src/services/users.service.core.ts")), /deps\.isRecoveryEnabled\?\.\(\)(?! === true)/, "never passed or used loosely");
   // A failure toast never claims that no e-mail was sent (an uncertain result may have sent one).
   assert.match(panel, /title: "Sign-in link not confirmed as sent", description: result\.error/);
   assert.doesNotMatch(panel, /No sign-in link was sent/);
