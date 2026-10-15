@@ -173,7 +173,7 @@ export function CourseForm({ basePath, initial, locked = false }: { basePath: st
               name="durationHours"
               type="number"
               inputMode="decimal"
-              min={0}
+              min={0.5}
               step={0.5}
               value={draft.durationHours}
               onChange={(e) => set("durationHours", e.target.value)}

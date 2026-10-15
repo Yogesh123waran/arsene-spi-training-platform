@@ -155,7 +155,7 @@ test("modules: generated codes and positions, edit, reorder, delete with renumbe
   assert.deepEqual((await modules(c.courseId)).map((m) => `${m.seq}:${m.code}`), ["1:M01", "2:M03", "3:M02"]);
   assert.equal((await svc.deleteModule(await id("M01"))).ok, true);
   assert.deepEqual((await modules(c.courseId)).map((m) => `${m.seq}:${m.code}`), ["1:M03", "2:M02"], "later modules move up");
-  assert.equal((await svc.createModule(c.courseId, { title: "Extra", description: "", durationHours: 0 })).message, "Module M04 added.", "codes are never reused");
+  assert.equal((await svc.createModule(c.courseId, { title: "Extra", description: "", durationHours: 1 })).message, "Module M04 added.", "codes are never reused");
   assert.deepEqual((await events(c.courseId)).map((e) => e.type), [
     "course_created", "module_created", "module_created", "module_created", "module_updated", "module_moved", "module_deleted", "module_created",
   ]);
@@ -431,18 +431,19 @@ test("module descriptions: empty and missing are the same, so no false change an
   const c = await create();
   const legacyMid = await db.admin("select gen_random_uuid()");
   await db.exec(`insert into public.modules (id, course_id, title, description, sequence) values ('${legacyMid}', '${c.courseId}', 'Legacy', '', 1);`);
-  await admin().createModule(c.courseId, { title: "New", description: "", durationHours: 0 });
+  await admin().createModule(c.courseId, { title: "New", description: "", durationHours: 1 });
   const newMid = await db.admin(`select id from public.modules where course_id = '${c.courseId}' and title = 'New'`);
   assert.equal(await db.admin(`select description from public.modules where id = '${newMid}'`), null, "stored as missing");
   const eventsBefore = await db.admin(`select count(*) from public.course_events where course_id = '${c.courseId}' and event_type = 'module_updated'`);
   for (const [mid, title] of [[legacyMid, "Legacy"], [newMid, "New"]]) {
-    assert.equal((await admin().updateModule(mid, { title, description: "", durationHours: 0 })).error, "Nothing changed.", title);
-    assert.equal((await admin().updateModule(mid, { title, description: "   ", durationHours: 0 })).error, "Nothing changed.", `${title} (blank)`);
+    assert.equal((await admin().updateModule(mid, { title, description: "" })).error, "Nothing changed.", title);
+    assert.equal((await admin().updateModule(mid, { title, description: "   " })).error, "Nothing changed.", `${title} (blank)`);
   }
   assert.equal(await db.admin(`select count(*) from public.course_events where course_id = '${c.courseId}' and event_type = 'module_updated'`), eventsBefore);
   assert.equal(await db.admin(`select description from public.modules where id = '${legacyMid}'`), "", "legacy row not rewritten");
-  // A real change is still saved and audited.
-  assert.equal((await admin().updateModule(legacyMid, { title: "Legacy", description: "Now described.", durationHours: 0 })).ok, true);
+  // A real change is still saved and audited — even though the legacy module has 0 hours (unchanged hours are not
+  // sent, so not re-validated).
+  assert.equal((await admin().updateModule(legacyMid, { title: "Legacy", description: "Now described." })).ok, true);
 });
 
 test("a module referenced by a question cannot be deleted (the question bank keeps its module)", async () => {

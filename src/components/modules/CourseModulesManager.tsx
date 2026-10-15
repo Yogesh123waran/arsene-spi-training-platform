@@ -164,9 +164,14 @@ function ModuleDialog({ courseId, editing, onClose }: { courseId: string; editin
     setErrors({});
     setFormError(null);
     const h = hours.trim();
-    const input = { title, description, durationHours: h === "" ? 0 : /^\d+(\.\d+)?$/.test(h) ? Number(h) : Number.NaN };
+    // Empty or invalid hours are sent as NaN and refused by the validation (never silently turned into 0).
+    const durationHours = /^\d+(\.\d+)?$/.test(h) ? Number(h) : Number.NaN;
+    // Editing sends the hours only when they changed, so an existing 0-hour module can still be renamed or described.
+    const hoursChanged = !initial || h !== String(initial.durationHours ?? "");
     startTransition(async () => {
-      const result = initial ? await updateModuleAction(courseId, initial.id, input) : await createModuleAction(courseId, input);
+      const result = initial
+        ? await updateModuleAction(courseId, initial.id, hoursChanged ? { title, description, durationHours } : { title, description })
+        : await createModuleAction(courseId, { title, description, durationHours });
       if (!result.ok) {
         setErrors(result.errors ?? {});
         setFormError(result.errors && Object.keys(result.errors).length > 0 ? null : result.error);
@@ -224,7 +229,7 @@ function ModuleDialog({ courseId, editing, onClose }: { courseId: string; editin
           name="moduleHours"
           type="number"
           inputMode="decimal"
-          min={0}
+          min={0.5}
           step={0.5}
           value={hours}
           onChange={(e) => setHours(e.target.value)}

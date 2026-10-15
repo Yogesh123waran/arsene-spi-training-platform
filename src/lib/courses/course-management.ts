@@ -14,6 +14,7 @@ import {
   type CourseValidationErrors,
   type CreateCourseInput,
   type ModuleInput,
+  type ModuleUpdateInput,
   type ModuleValidationErrors,
 } from "@/types/course";
 
@@ -39,9 +40,10 @@ export type CourseActionResult =
 
 const text = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
-/** Hours: a finite number, 0 … 9999.9, at most one decimal place (numeric(6, 1)). */
+/** Hours: a finite number, more than 0 and at most 9999.9, at most one decimal place (numeric(6, 1)). */
 export function hoursError(value: unknown, label = "Duration"): string | null {
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return `${label} must be a number of hours (0 or more).`;
+  if (typeof value !== "number" || !Number.isFinite(value)) return `${label} must be a number of hours.`;
+  if (value <= 0) return `${label} must be more than 0 hours.`;
   if (value > COURSE_INPUT_LIMITS.durationMax) return `${label} must be ${COURSE_INPUT_LIMITS.durationMax.toLocaleString("en-IN")} hours or fewer.`;
   if (Math.round(value * 10) !== value * 10) return `${label} can have at most one decimal place.`;
   return null;
@@ -107,19 +109,31 @@ export function validateCreateCourse(input: Partial<CreateCourseInput> | null | 
   return { errors, clean: { ...clean, status } };
 }
 
+/** Add Module: title and planned hours are required (hours more than 0); a missing value is never turned into 0. */
 export function validateModule(input: Partial<ModuleInput> | null | undefined): { errors: ModuleValidationErrors; clean: ModuleInput } {
+  const { errors, clean } = validateModuleUpdate(input);
+  if (clean.durationHours === undefined) errors.durationHours = hoursError(undefined) ?? undefined;
+  return { errors, clean: { ...clean, durationHours: clean.durationHours ?? Number.NaN } };
+}
+
+/**
+ * Edit Module: planned hours are validated only when sent — the form sends them just when they changed — so an
+ * existing module with legacy 0 hours can still be renamed or described without touching its hours.
+ */
+export function validateModuleUpdate(input: Partial<ModuleInput> | null | undefined): { errors: ModuleValidationErrors; clean: ModuleUpdateInput } {
   const errors: ModuleValidationErrors = {};
   const title = text(input?.title);
   const description = text(input?.description);
-  const durationHours = input?.durationHours ?? 0;
+  const durationHours = input?.durationHours;
   if (!title) errors.title = "Module title is required.";
   else if (title.length > COURSE_INPUT_LIMITS.titleMax) errors.title = `Module title must be ${COURSE_INPUT_LIMITS.titleMax} characters or fewer.`;
   if (description.length > COURSE_INPUT_LIMITS.moduleDescriptionMax) {
     errors.description = `Description must be ${COURSE_INPUT_LIMITS.moduleDescriptionMax.toLocaleString("en-IN")} characters or fewer.`;
   }
+  if (durationHours === undefined) return { errors, clean: { title, description } };
   const hours = hoursError(durationHours);
   if (hours) errors.durationHours = hours;
-  return { errors, clean: { title, description, durationHours: typeof durationHours === "number" ? durationHours : 0 } };
+  return { errors, clean: { title, description, durationHours: typeof durationHours === "number" ? durationHours : Number.NaN } };
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

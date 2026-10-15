@@ -132,7 +132,7 @@ export function createCourseManagementRepository(getClient: () => Promise<Client
     deleteCourse: (courseId: string) => call("admin_delete_course", { p_course_id: courseId }),
     createModule: (courseId: string, p: { title: string; description: string; duration_hours: number }) =>
       call("admin_create_module", { p_course_id: courseId, p }),
-    updateModule: (moduleId: string, p: { title: string; description: string; duration_hours: number }) =>
+    updateModule: (moduleId: string, p: { title: string; description: string; duration_hours?: number }) =>
       call("admin_update_module", { p_module_id: moduleId, p }),
     moveModule: (moduleId: string, direction: "up" | "down") => call("admin_move_module", { p_module_id: moduleId, p_direction: direction }),
     deleteModule: (moduleId: string) => call("admin_delete_module", { p_module_id: moduleId }),

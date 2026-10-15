@@ -24,10 +24,11 @@ import {
   validateCourseDetailsPatch,
   validateCreateCourse,
   validateModule,
+  validateModuleUpdate,
   type CourseActionResult,
 } from "@/lib/courses/course-management";
 import type { AuthUser } from "@/types/auth";
-import type { CourseDetailsInput, CourseHistoryEntry, CourseUsage, CreateCourseInput, ModuleInput } from "@/types/course";
+import type { CourseDetailsInput, CourseHistoryEntry, CourseUsage, CreateCourseInput, ModuleInput, ModuleUpdateInput } from "@/types/course";
 import {
   CourseManagementPermissionError,
   CourseManagementUnavailableError,
@@ -100,6 +101,12 @@ export function createCourseManagementService(deps: CourseManagementServiceDeps)
     duration_hours: c.durationHours,
   });
   const modulePayload = (m: ModuleInput) => ({ title: m.title, description: m.description, duration_hours: m.durationHours });
+  // Edit: planned hours only when sent (changed) — unchanged hours are never re-validated or rewritten.
+  const moduleUpdatePayload = (m: ModuleUpdateInput) => ({
+    title: m.title,
+    description: m.description,
+    ...(m.durationHours !== undefined ? { duration_hours: m.durationHours } : {}),
+  });
 
   return {
     async createCourse(input: Partial<CreateCourseInput>): Promise<CourseActionResult> {
@@ -159,13 +166,13 @@ export function createCourseManagementService(deps: CourseManagementServiceDeps)
       return run(() => deps.repository.createModule(courseId, modulePayload(clean)), (r) => ({ ok: true, message: `Module ${s(r.data.module_code) ?? ""} added.` }));
     },
 
-    async updateModule(moduleId: unknown, input: Partial<ModuleInput>): Promise<CourseActionResult> {
+    async updateModule(moduleId: unknown, input: Partial<ModuleUpdateInput>): Promise<CourseActionResult> {
       const refusal = await denied();
       if (refusal) return refusal;
       if (!isUuid(moduleId)) return NOT_FOUND;
-      const { errors, clean } = validateModule(input);
+      const { errors, clean } = validateModuleUpdate(input);
       if (Object.keys(errors).length > 0) return invalid(errors);
-      return run(() => deps.repository.updateModule(moduleId, modulePayload(clean)), () => ({ ok: true, message: "Module saved." }));
+      return run(() => deps.repository.updateModule(moduleId, moduleUpdatePayload(clean)), () => ({ ok: true, message: "Module saved." }));
     },
 
     async moveModule(moduleId: unknown, direction: unknown): Promise<CourseActionResult> {

@@ -63,6 +63,8 @@ test("course validation: required title / level / hours, limits, one decimal, Dr
     [{ description: "d".repeat(2001) }, "description"],
     [{ level: "expert" }, "level"],
     [{ durationHours: -1 }, "durationHours"],
+    [{ durationHours: 0 }, "durationHours"],
+    [{ durationHours: undefined }, "durationHours"],
     [{ durationHours: Number.NaN }, "durationHours"],
     [{ durationHours: "40" }, "durationHours"],
     [{ durationHours: 10000 }, "durationHours"],
@@ -75,12 +77,18 @@ test("course validation: required title / level / hours, limits, one decimal, Dr
   assert.ok(!("courseCode" in lib.validateCreateCourse({ ...course(), courseCode: "HACK-1" }).clean), "a code is never part of the input");
 });
 
-test("module validation: title required, optional description and hours", () => {
-  assert.deepEqual(lib.validateModule({ title: " Loops ", description: "", durationHours: 0 }), { errors: {}, clean: { title: "Loops", description: "", durationHours: 0 } });
+test("module validation: title and planned hours (more than 0) required on add; hours optional (unchanged) on edit", () => {
+  assert.deepEqual(lib.validateModule({ title: " Loops ", description: "", durationHours: 0.5 }), { errors: {}, clean: { title: "Loops", description: "", durationHours: 0.5 } });
+  for (const bad of [0, -2, Number.NaN, "3", 1.25, 10000, undefined]) {
+    assert.ok(lib.validateModule({ title: "x", durationHours: bad }).errors.durationHours, `add: ${String(bad)}`);
+    if (bad !== undefined) assert.ok(lib.validateModuleUpdate({ title: "x", durationHours: bad }).errors.durationHours, `edit: ${String(bad)}`);
+  }
+  assert.match(lib.validateModule({ title: "x", durationHours: 0 }).errors.durationHours, /more than 0 hours/);
+  // Edit without hours (unchanged): valid, and nothing about hours is sent — a legacy 0-hour module stays editable.
+  assert.deepEqual(lib.validateModuleUpdate({ title: "x", description: "" }), { errors: {}, clean: { title: "x", description: "" } });
   assert.ok(lib.validateModule({ title: "" }).errors.title);
   assert.ok(lib.validateModule({ title: "x", description: "d".repeat(1001) }).errors.description);
-  assert.ok(lib.validateModule({ title: "x", durationHours: -2 }).errors.durationHours);
-  assert.deepEqual(lib.validateModule({ title: "x" }).clean.durationHours, 0, "hours default to 0");
+  assert.ok(lib.validateModule({ title: "x" }).errors.durationHours, "missing hours are refused on add (never turned into 0)");
 });
 
 // ---- authorization ----
@@ -157,7 +165,7 @@ test("refusals: duplicate title (with the existing code, on the title field), hi
   assert.match(dup.error, /already exists \(CRS-00003\)\. Reuse that course/);
   assert.equal(dup.errors.title, dup.error);
   assert.match((await service("admin", { updateCourse: refuse("course_has_history") }).svc.updateCourse(COURSE, course())).error, /locked to protect batch history/);
-  assert.match((await service("admin", { createModule: refuse("course_has_history") }).svc.createModule(COURSE, { title: "M" })).error, /locked/);
+  assert.match((await service("admin", { createModule: refuse("course_has_history") }).svc.createModule(COURSE, { title: "M", durationHours: 1 })).error, /locked/);
   assert.match((await service("admin", { setCourseStatus: refuse("has_batches") }).svc.setCourseStatus(COURSE, "draft")).error, /Deactivate it instead/);
   assert.match((await service("admin", { deleteCourse: refuse("course_in_use") }).svc.deleteCourse(COURSE)).error, /can't be deleted\. Deactivate it instead/);
   assert.match((await service("admin", { deleteModule: refuse("module_in_use") }).svc.deleteModule(MODULE)).error, /used by classes or questions/);
@@ -169,7 +177,7 @@ test("success messages: status changes explain their effect on batches", async (
   const { svc } = service();
   assert.match((await svc.setCourseStatus(COURSE, "archived")).message, /existing batches continue normally/);
   assert.match((await svc.setCourseStatus(COURSE, "published")).message, /new batches/);
-  assert.equal((await svc.createModule(COURSE, { title: "Loops" })).message, "Module M03 added.");
+  assert.equal((await svc.createModule(COURSE, { title: "Loops", durationHours: 1 })).message, "Module M03 added.");
 });
 
 test("getManagement: usage plus history as sentences; the caller's own actions read 'you'", async () => {

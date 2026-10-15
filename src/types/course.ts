@@ -27,6 +27,9 @@ export interface ModuleInput {
   durationHours: number;
 }
 
+/** Edit module: planned hours are sent only when they change (so a legacy 0-hour module stays editable). */
+export type ModuleUpdateInput = Omit<ModuleInput, "durationHours"> & { durationHours?: number };
+
 export type ModuleValidationErrors = Partial<Record<keyof ModuleInput, string>> & { form?: string };
 
 /** Form limits — the same limits the 0030 functions enforce (numeric(6, 1) hours). */

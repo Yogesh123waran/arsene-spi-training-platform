@@ -13,7 +13,7 @@
 import { revalidatePath } from "next/cache";
 import { courseManagementService } from "./course-management.service";
 import type { CourseActionResult } from "@/lib/courses/course-management";
-import type { CourseDetailsInput, CreateCourseInput, ModuleInput } from "@/types/course";
+import type { CourseDetailsInput, CreateCourseInput, ModuleInput, ModuleUpdateInput } from "@/types/course";
 
 function refresh(courseId?: string) {
   revalidatePath("/admin/courses");
@@ -50,7 +50,7 @@ export async function createModuleAction(courseId: string, input: ModuleInput): 
   return done(await courseManagementService.createModule(courseId, input), courseId);
 }
 
-export async function updateModuleAction(courseId: string, moduleId: string, input: ModuleInput): Promise<CourseActionResult> {
+export async function updateModuleAction(courseId: string, moduleId: string, input: ModuleUpdateInput): Promise<CourseActionResult> {
   return done(await courseManagementService.updateModule(moduleId, input), courseId);
 }
 
