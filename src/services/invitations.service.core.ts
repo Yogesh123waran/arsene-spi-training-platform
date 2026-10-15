@@ -98,6 +98,19 @@ function logDelivery(invitationId: string, kind: string, fields: Record<string, 
   console.error(`[invitations] delivery ${kind}: invitation=${invitationId} ${detail}`);
 }
 
+/**
+ * Sending is not configured: one log line naming the missing server setting (a fixed setting name, never a value),
+ * so an operator can fix it from the server log. The user only ever sees the generic "not configured" outcome.
+ */
+function notConfigured(missing: "app_url" | "service_role"): null {
+  console.error(
+    missing === "app_url"
+      ? "[invitations] sending not configured: NEXT_PUBLIC_APP_URL is missing, invalid or not https"
+      : "[invitations] sending not configured: no service-role client (check the Supabase URL and service-role key settings)"
+  );
+  return null;
+}
+
 /** An unrecognised refusal code from the database is an error, never passed on as a reason. */
 function unexpectedRefusal(stage: string, reason: string): never {
   console.error(`[invitations] unexpected ${stage} refusal code: ${reason}`);
@@ -116,9 +129,9 @@ export function createInvitationsService(deps: InvitationsServiceDeps) {
   function openSending(): { redirectTo: string; delivery: AuthAdminDelivery } | null {
     if (deps.isDemoMode?.()) return null;
     const redirectTo = deps.redirectUrl();
-    if (!redirectTo) return null;
+    if (!redirectTo) return notConfigured("app_url");
     const delivery = deps.authAdmin.openDelivery();
-    return delivery ? { redirectTo, delivery } : null;
+    return delivery ? { redirectTo, delivery } : notConfigured("service_role");
   }
 
   async function deliver(

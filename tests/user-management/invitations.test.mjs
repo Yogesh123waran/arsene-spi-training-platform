@@ -204,11 +204,48 @@ test("service: only active Super Admins; nothing is called otherwise", async () 
 });
 
 test("service: not configured (no service-role client, unsafe app URL, demo mode) → unavailable before any database call", async () => {
-  for (const o of [{ configured: false }, { redirect: null }, { demo: true }]) {
+  for (const [o, logged] of [
+    [{ configured: false }, /^\[invitations\] sending not configured: no service-role client \(check the Supabase URL and service-role key settings\)$/],
+    [{ redirect: null }, /^\[invitations\] sending not configured: NEXT_PUBLIC_APP_URL is missing, invalid or not https$/],
+    [{ demo: true }, null],
+  ]) {
     const { svc, log } = harness(o);
-    assert.deepEqual(await svc.inviteUser(INPUT), { kind: "unavailable", invitationId: null, reason: "not_configured" });
-    assert.deepEqual(await svc.resendInvitation(ID), { kind: "unavailable", invitationId: ID, reason: "not_configured" });
+    const created = await quiet(() => svc.inviteUser(INPUT));
+    assert.deepEqual(created.result, { kind: "unavailable", invitationId: null, reason: "not_configured" });
+    const resent = await quiet(() => svc.resendInvitation(ID));
+    assert.deepEqual(resent.result, { kind: "unavailable", invitationId: ID, reason: "not_configured" });
     assert.deepEqual(log, [], JSON.stringify(o));
+    // The server log names the missing setting (a fixed name, never a value); demo mode is expected, not logged.
+    for (const { lines } of [created, resent]) {
+      if (logged) {
+        assert.equal(lines.length, 1, JSON.stringify(o));
+        assert.match(lines[0], logged);
+      } else {
+        assert.deepEqual(lines, [], JSON.stringify(o));
+      }
+    }
+  }
+});
+
+test("redirect: the deployed Vercel address gives the invitation link's landing page; a missing or plain-http address gives none", () => {
+  const live = "https://arsene-spi-training-platform.vercel.app/auth/confirm";
+  assert.equal(I.invitationRedirectUrl("https://arsene-spi-training-platform.vercel.app"), live);
+  assert.equal(I.invitationRedirectUrl(" https://arsene-spi-training-platform.vercel.app/ "), live);
+  for (const v of [undefined, null, "", "   ", "http://arsene-spi-training-platform.vercel.app", "arsene-spi-training-platform.vercel.app"]) {
+    assert.equal(I.invitationRedirectUrl(v), null, String(v));
+  }
+});
+
+test("service: Super Admin, Trainer and Student invitations use the same create → begin → invite → record workflow", async () => {
+  for (const [role, dbRole] of [["admin", "super_admin"], ["trainer", "trainer"], ["student", "student"]]) {
+    const h = harness();
+    const { result, lines } = await quiet(() => h.svc.inviteUser({ ...INPUT, role }));
+    assert.deepEqual(result, { kind: "sent", invitationId: ID, attempt: "initial" }, role);
+    assert.deepEqual(h.log.map((l) => l[0]), ["create", "begin", "invite", "record"], role);
+    assert.equal(h.log[0][1].role, dbRole, role);
+    assert.deepEqual(h.log[2], ["invite", "db.owned@x.test", REDIRECT], "the database-owned address and the configured redirect");
+    assert.deepEqual(h.log[3], ["record", ID, true, USER]);
+    assert.deepEqual(lines, []);
   }
 });
 
