@@ -126,6 +126,10 @@ try {
     "src/lib/dashboard/trainer-dashboard.ts",
     "src/repositories/trainer-dashboard.repository.core.ts",
     "src/services/trainer-dashboard.service.core.ts",
+    // Reports (attendance, performance, test results, assignment completion)
+    "src/lib/reports/reports.ts",
+    "src/repositories/reports.repository.core.ts",
+    "src/services/reports.service.core.ts",
   ];
   for (const rel of sources) {
     const code = ts.transpileModule(fs.readFileSync(path.join(root, rel), "utf8"), {
